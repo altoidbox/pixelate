@@ -89,6 +89,15 @@ class Font3x5(pygame.font.Font):
         return canvas  #.subsurface(0, 0, x, y + fixed_height)
 
 
+class Font6x10(pygame.font.Font):
+    CHR_WIDTH = 6
+    CHR_HEIGHT = 10
+    
+    def render(self, text: str, antialias, color, background=None) -> Surface:
+        surface = Font3x5().render(text, antialias, color, background)
+        return pygame.transform.scale_by(surface, 2)
+
+
 def disable_dpi_scaling():
     if os.name == 'nt':
         try:
@@ -224,22 +233,22 @@ class Pixelate:
 
 def app(pxl8: Pixelate):
     try:
-        font = Font3x5()
+        font = Font6x10()
         #i = 0
         while pxl8.running:
             #msg = str(i)
             msg = time.strftime("%e %b")
-            y = 32//2 - 6
+            y = 32//2 - font.CHR_HEIGHT - 1
             with pxl8.lock:
                 pxl8.clear_box(0, 0, pxl8.width, pxl8.height)
                 shadow = font.render(msg, antialias=0, color=(80, 80, 80))
                 line = font.render(msg, antialias=0, color=WHITE)
-                print(line.get_width(), 'x', line.get_height())
+                #print(line.get_width(), 'x', line.get_height())
                 x = 64 // 2 - (line.get_width()) // 2
                 pxl8.draw_surface((x+1, y), shadow)
                 pxl8.draw_surface((x, y), line)
                 #p.draw_str(64 // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=(80, 80, 80))
-                y += 7
+                y += font.CHR_HEIGHT + 1
                 msg = time.strftime("%I:%M %p").lower().lstrip('0')
                 shadow = font.render(msg, antialias=0, color=(80, 80, 80))
                 line = font.render(msg, antialias=0, color=WHITE)
