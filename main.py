@@ -6,7 +6,7 @@ import threading
 from pygame import Surface
 
 
-CLEAR = pygame.Color(255, 0, 255, 0)
+CLEAR = pygame.Color(0, 0, 0, 0)
 WHITE = pygame.Color(255, 255, 255, 255)
 
 
@@ -52,6 +52,9 @@ class Font3x5(pygame.font.Font):
     ]
     shape_map = {}
 
+    def __init__(self):
+        super().__init__(size=6)
+
     @classmethod
     def get(cls, char):
         shape = cls.shape_map.get(char, None)
@@ -72,7 +75,7 @@ class Font3x5(pygame.font.Font):
         fixed_height = self.CHR_HEIGHT
         canvas = Surface((fixed_width, fixed_height), flags=pygame.SRCALPHA)
         if not background:
-            background = pygame.Color(255, 0, 255, 0)
+            background = pygame.Color(0, 0, 0, 0)
         canvas.fill(background)
         x = -1
         y = 0
@@ -93,6 +96,9 @@ class Font6x10(pygame.font.Font):
     CHR_WIDTH = 6
     CHR_HEIGHT = 10
     
+    def __init__(self):
+        super().__init__(size=22)
+
     def render(self, text: str, antialias, color, background=None) -> Surface:
         surface = Font3x5().render(text, antialias, color, background)
         return pygame.transform.scale_by(surface, 2)
@@ -127,14 +133,6 @@ class Pixelate:
         self.lock = threading.RLock()
         self.clock = pygame.time.Clock()
 
-        self.width = 64
-        self.height = 32
-        self.background = []
-        self.foreground = []
-        for y in range(self.height):
-            self.background.append([pygame.Color(y*2, y*5, y*8)] * self.width)
-            self.foreground.append([CLEAR] * self.width)
-
         pygame.display.init()
         monitor_info = pygame.display.Info()
         screen_width, screen_height = pygame.display.get_desktop_sizes()[0]
@@ -143,12 +141,17 @@ class Pixelate:
         screen_height = monitor_info.current_h
         print(screen_width, screen_height)
 
+        self.width = 64
         self.pixel_width = screen_width // self.width
-        pixel_height = screen_height // self.height
-        if pixel_height < self.pixel_width:
-            self.pixel_width = pixel_height
+        self.height = screen_height // self.pixel_width
 
+        print(f"Pixel disp: {self.width}x{self.height}")
         print(f"Pixel size: {self.pixel_width}x{self.pixel_width}")
+        self.background = []
+        self.foreground = []
+        for y in range(self.height):
+            self.background.append([pygame.Color(min(y*2, 255), min(y*5, 255), min(y*8, 255), 255)] * self.width)
+            self.foreground.append([CLEAR] * self.width)
 
         self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN)  #  | pygame.SCALED | pygame.NOFRAME
         pygame.event.set_grab(True)
@@ -168,6 +171,8 @@ class Pixelate:
         pygame.quit()
 
     def set_color(self, x, y, color):
+        if x >= self.width or y >= self.height:
+            return
         self.foreground[y][x] = color
 
     @with_lock
@@ -184,16 +189,22 @@ class Pixelate:
     def draw_surface(self, coord, surface: Surface):
         x, y = coord
         w, h = surface.get_width(), surface.get_height()
-        with pygame.PixelArray(surface) as pxarray:
-            for yoff in range(h):
-                cury = y + yoff
-                for xoff in range(w):
-                    curx = x + xoff
-                    color = pxarray[xoff, yoff]
-                    #print(xoff, yoff, (color >> 24) & 0xFF, (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF)
-                    alpha = (color >> 24) & 0xFF
-                    if alpha > 0:
-                        self.set_color(curx, cury, color)
+        #with pygame.PixelArray(surface) as pxarray:
+        surface.lock()
+        for yoff in range(h):
+            cury = y + yoff
+            for xoff in range(w):
+                curx = x + xoff
+                #color = pxarray[xoff, yoff]
+                #print(xoff, yoff, (color >> 24) & 0xFF, (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF)
+                #alpha = (color >> 24) & 0xFF
+                #color = surface.get_at_mapped((xoff, yoff))
+                #color = surface.unmap_rgb(color)
+                color = surface.get_at((xoff, yoff))
+                if color == surface.get_colorkey() or color.a == 0:
+                    continue
+                self.set_color(curx, cury, color)
+        surface.unlock()
 
     def clear_box(self, x, y, width, height):
         row = [ 1 ] * width
@@ -218,46 +229,61 @@ class Pixelate:
 
     @with_lock
     def paint(self):
+        pixel = pygame.Surface((self.pixel_width, self.pixel_width), pygame.SRCALPHA)
         for y in range(self.height):
             for x in range(self.width):
                 coord = (x*self.pixel_width, y*self.pixel_width, self.pixel_width, self.pixel_width)
-                color = self.foreground[y][x]
-                if color == CLEAR:
-                    color = self.background[y][x]
-                pygame.draw.rect(self.screen, color, coord)
-                pygame.draw.rect(self.screen, pygame.Color(40, 40, 40), coord, width=2)
-                pygame.draw.rect(self.screen, pygame.Color(0, 0, 0), coord, width=1)
+                #color = self.foreground[y][x]
+                #if color == CLEAR:
+                #    color = self.background[y][x]
+                #pixel.fill(self.background[y][x])
+                pygame.draw.rect(self.screen, self.background[y][x], coord)
+                pixel.fill(self.foreground[y][x])
+                pygame.draw.rect(pixel, pygame.Color(40, 40, 40), (0, 0, self.pixel_width, self.pixel_width), width=2)
+                pygame.draw.rect(pixel, pygame.Color(0, 0, 0), (0, 0, self.pixel_width, self.pixel_width), width=1)
+                #pygame.draw.rect(self.screen, self.foreground[y][x], coord)
+                #pygame.draw.rect(self.screen, pygame.Color(40, 40, 40), coord, width=2)
+                #pygame.draw.rect(self.screen, pygame.Color(0, 0, 0), coord, width=1)
+                self.screen.blit(pixel, coord)
             #pygame.draw.
         pygame.display.flip()
 
 
 def app(pxl8: Pixelate):
     try:
-        font = Font6x10()
-        #i = 0
+        #font = Font6x10()
+        fonts = []
+        #fonts += [Font6x10()]
+        fonts += [pygame.font.Font(name, size=16) for name in os.listdir('.') if name.endswith('.ttf')]
+        #font = pygame.font.Font('Doto-Thin.ttf', size=12)
+        #font.set_bold(False)
+        i = 0
+        interval = 10
         while pxl8.running:
             #msg = str(i)
+            if i % interval == 0:
+                font = fonts[(i // interval) % len(fonts)]
             msg = time.strftime("%e %b")
-            y = 32//2 - font.CHR_HEIGHT - 1
             with pxl8.lock:
                 pxl8.clear_box(0, 0, pxl8.width, pxl8.height)
-                shadow = font.render(msg, antialias=0, color=(80, 80, 80))
-                line = font.render(msg, antialias=0, color=WHITE)
+                shadow = font.render(msg, 0, (80, 80, 80))
+                line = font.render(msg, 0, WHITE)
                 #print(line.get_width(), 'x', line.get_height())
-                x = 64 // 2 - (line.get_width()) // 2
+                x = pxl8.width // 2 - (line.get_width()) // 2
+                y = pxl8.height // 2 - font.get_height() #line.get_height()
                 pxl8.draw_surface((x+1, y), shadow)
                 pxl8.draw_surface((x, y), line)
-                #p.draw_str(64 // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=(80, 80, 80))
-                y += font.CHR_HEIGHT + 1
+                #p.draw_str(pxl8.width // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=(80, 80, 80))
+                y += font.get_ascent()  #font.get_height() - 2
                 msg = time.strftime("%I:%M %p").lower().lstrip('0')
-                shadow = font.render(msg, antialias=0, color=(80, 80, 80))
-                line = font.render(msg, antialias=0, color=WHITE)
-                x = 64 // 2 - (line.get_width()) // 2
+                shadow = font.render(msg, 0, (80, 80, 80))
+                line = font.render(msg, 0, WHITE)
+                x = pxl8.width // 2 - (line.get_width()) // 2
                 pxl8.draw_surface((x+1, y), shadow)
                 pxl8.draw_surface((x, y), line)
-                #pxl8.draw_str(64 // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=pygame.Color(80, 80, 80))
+                #pxl8.draw_str(pxl8.width // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=pygame.Color(80, 80, 80))
             time.sleep(1)
-            #i += 1
+            i += 1
     finally:
         pxl8.running = False
 
