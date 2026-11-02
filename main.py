@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 import pygame
 import time
 import os
 import ctypes
 import threading
+from pathlib import Path
 from pygame import Surface
 
 
@@ -52,11 +54,8 @@ class Font3x5(pygame.font.Font):
     ]
     shape_map = {}
 
-    def __init__(self):
-        super().__init__(size=6)
-
     @classmethod
-    def get(cls, char):
+    def get_shape(cls, char):
         shape = cls.shape_map.get(char, None)
         if shape is not None:
             return shape
@@ -70,10 +69,33 @@ class Font3x5(pygame.font.Font):
         cls.shape_map[char] = shape
         return shape
 
+    def size(self, text):
+        fixed_width = -1
+        for c in text:
+            if self.get_shape(c) is None:
+                continue
+            fixed_width += self.CHR_WIDTH + 1
+        if fixed_width < 0:
+            return 0, 0
+        return fixed_width, self.get_height()
+
+    def get_height(self):
+        return self.CHR_HEIGHT + (2 if self.underline else 0)
+
+    def get_ascent(self):
+        return self.CHR_HEIGHT
+
+    def get_descent(self):
+        return 2 if self.underline else 0
+
+    def get_linesize(self):
+        return self.get_height() + 2
+
     def render(self, text: str, antialias, color, background=None) -> Surface:
-        fixed_width = (self.CHR_WIDTH + 1) * len(text) - 1
-        fixed_height = self.CHR_HEIGHT
+        fixed_width, fixed_height = self.size(text)
         canvas = Surface((fixed_width, fixed_height), flags=pygame.SRCALPHA)
+        if fixed_width == 0:
+            return canvas
         if not background:
             background = pygame.Color(0, 0, 0, 0)
         canvas.fill(background)
@@ -81,15 +103,15 @@ class Font3x5(pygame.font.Font):
         y = 0
         with pygame.PixelArray(canvas) as pxarray:
             for c in text:
-                shape = self.get(c)
+                shape = self.get_shape(c)
                 if shape is None:
                     continue
                 x += 1
                 draw_shape(pxarray, shape, (x, y), color)
                 x += self.CHR_WIDTH
-        if x < 0:
-            return Surface((0, 0))
-        return canvas  #.subsurface(0, 0, x, y + fixed_height)
+        if self.underline:
+            pygame.draw.line(canvas, color, (0, y + self.CHR_HEIGHT + 1), (fixed_width - 1, y + self.CHR_HEIGHT + 1), width=1)
+        return canvas
 
 
 class Font6x10(pygame.font.Font):
@@ -97,10 +119,29 @@ class Font6x10(pygame.font.Font):
     CHR_HEIGHT = 10
     
     def __init__(self):
-        super().__init__(size=22)
+        super().__init__()
+        self.source = Font3x5()
+
+    def size(self, text):
+        self.source.underline = self.underline
+        w, h = self.source.size(text)
+        return w * 2, h * 2
+
+    def get_height(self):
+        return self.CHR_HEIGHT
+
+    def get_ascent(self):
+        return self.CHR_HEIGHT
+
+    def get_descent(self):
+        return 4 if self.underline else 0
+
+    def get_linesize(self):
+        return self.get_height() + 2
 
     def render(self, text: str, antialias, color, background=None) -> Surface:
-        surface = Font3x5().render(text, antialias, color, background)
+        self.source.underline = self.underline
+        surface = self.source.render(text, antialias, color, background)
         return pygame.transform.scale_by(surface, 2)
 
 
@@ -153,7 +194,7 @@ class Pixelate:
             self.background.append([pygame.Color(min(y*2, 255), min(y*5, 255), min(y*8, 255), 255)] * self.width)
             self.foreground.append([CLEAR] * self.width)
 
-        self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN)  #  | pygame.SCALED | pygame.NOFRAME
+        self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  #  | pygame.SCALED | pygame.NOFRAME
         pygame.event.set_grab(True)
         self.running = True
 
@@ -167,11 +208,13 @@ class Pixelate:
                 elif event.type == pygame.KEYDOWN:
                     if event.key in (pygame.K_q, pygame.K_ESCAPE):
                         self.running = False
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    self.running = False
             self.paint()
         pygame.quit()
 
     def set_color(self, x, y, color):
-        if x >= self.width or y >= self.height:
+        if x < 0 or x >= self.width or y < 0 or y >= self.height:
             return
         self.foreground[y][x] = color
 
@@ -249,18 +292,27 @@ class Pixelate:
         pygame.display.flip()
 
 
+def get_fonts():
+    fonts = []
+    #fonts += [Font3x5()]
+    #fonts += [Font6x10()]
+    size_maps = {
+        'PressStart2P-Regular.ttf': 8,
+        'PixelifySans-Regular.ttf': 10,
+        'Tiny5-Regular.ttf': 10,
+    }
+    for font_path in Path('./fonts').glob('*.ttf'):
+        size = size_maps.get(font_path.name, 12)
+        fonts.append(pygame.font.Font(str(font_path), size))
+    return fonts
+
+
 def app(pxl8: Pixelate):
     try:
-        #font = Font6x10()
-        fonts = []
-        #fonts += [Font6x10()]
-        fonts += [pygame.font.Font(name, size=16) for name in os.listdir('.') if name.endswith('.ttf')]
-        #font = pygame.font.Font('Doto-Thin.ttf', size=12)
-        #font.set_bold(False)
+        fonts = get_fonts()
         i = 0
         interval = 10
         while pxl8.running:
-            #msg = str(i)
             if i % interval == 0:
                 font = fonts[(i // interval) % len(fonts)]
             msg = time.strftime("%e %b")
@@ -268,20 +320,17 @@ def app(pxl8: Pixelate):
                 pxl8.clear_box(0, 0, pxl8.width, pxl8.height)
                 shadow = font.render(msg, 0, (80, 80, 80))
                 line = font.render(msg, 0, WHITE)
-                #print(line.get_width(), 'x', line.get_height())
                 x = pxl8.width // 2 - (line.get_width()) // 2
-                y = pxl8.height // 2 - font.get_height() #line.get_height()
+                y = pxl8.height // 2 - font.get_linesize()
                 pxl8.draw_surface((x+1, y), shadow)
                 pxl8.draw_surface((x, y), line)
-                #p.draw_str(pxl8.width // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=(80, 80, 80))
-                y += font.get_ascent()  #font.get_height() - 2
+                y += font.get_linesize()
                 msg = time.strftime("%I:%M %p").lower().lstrip('0')
                 shadow = font.render(msg, 0, (80, 80, 80))
                 line = font.render(msg, 0, WHITE)
                 x = pxl8.width // 2 - (line.get_width()) // 2
                 pxl8.draw_surface((x+1, y), shadow)
                 pxl8.draw_surface((x, y), line)
-                #pxl8.draw_str(pxl8.width // 2 - (len(msg) * 4) // 2, y, msg, WHITE, shadow=pygame.Color(80, 80, 80))
             time.sleep(1)
             i += 1
     finally:
@@ -295,7 +344,6 @@ def main():
     p.run()
     t.join()
     exit()
-
 
 
 if __name__ == "__main__":
