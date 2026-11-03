@@ -12,16 +12,6 @@ CLEAR = pygame.Color(0, 0, 0, 0)
 WHITE = pygame.Color(255, 255, 255, 255)
 
 
-class Canvas(Surface):
-    def render(self, canvas, coordinate):
-        pass
-
-
-class Font:
-    def render(self, canvas, coordinate):
-        pass
-
-
 def draw_shape(pxarray: pygame.PixelArray, shape, coord, color):
     x, y = coord
     #print(x, y, shape)
@@ -145,17 +135,34 @@ class Font6x10(pygame.font.Font):
         return pygame.transform.scale_by(surface, 2)
 
 
-def disable_dpi_scaling():
-    if os.name == 'nt':
-        try:
-            # Force the OS to map the window 1:1 pixel perfect to the monitor
-            ctypes.windll.user32.SetProcessDPIAware()
-        except Exception:
-            pass
+class SquarePixel:
+    def __init__(self, size):
+        self.size = size
+        self.inner_border_color = pygame.Color(40, 40, 40)
+        self.outer_border_color = pygame.Color(0, 0, 0)
+
+    def render(self, color, background):
+        surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        surface.fill(background)
+        pygame.draw.rect(surface, color, (2, 2, self.size - 3, self.size - 3))
+        pygame.draw.rect(surface, self.inner_border_color, (1, 1, self.size - 2, self.size - 2), width=1)
+        pygame.draw.rect(surface, self.outer_border_color, (0, 0, self.size, self.size), width=1)
+        return surface
 
 
-class Pixel:
-    pass
+class RoundPixel:
+    def __init__(self, size):
+        self.size = size
+        self.inner_border_color = pygame.Color(40, 40, 40)
+        self.outer_border_color = pygame.Color(0, 0, 0)
+
+    def render(self, color, background):
+        surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        surface.fill(background)
+        pygame.draw.circle(surface, color, (self.size // 2, self.size // 2), self.size // 2 - 2)
+        pygame.draw.circle(surface, self.inner_border_color, (self.size // 2, self.size // 2), self.size // 2 - 1, width=1)
+        pygame.draw.circle(surface, self.outer_border_color, (self.size // 2, self.size // 2), self.size // 2, width=1)
+        return surface
 
 
 def with_lock(func):
@@ -169,32 +176,29 @@ def with_lock(func):
 
 class Pixelate:
     def __init__(self):
-        disable_dpi_scaling()
         pygame.init()
         self.lock = threading.RLock()
         self.clock = pygame.time.Clock()
 
         pygame.display.init()
-        monitor_info = pygame.display.Info()
         screen_width, screen_height = pygame.display.get_desktop_sizes()[0]
-        print(screen_width, screen_height)
-        screen_width = monitor_info.current_w
-        screen_height = monitor_info.current_h
-        print(screen_width, screen_height)
 
         self.width = 64
         self.pixel_width = screen_width // self.width
         self.height = screen_height // self.pixel_width
 
+        print(f"Displ size: {screen_width}x{screen_height}")
         print(f"Pixel disp: {self.width}x{self.height}")
         print(f"Pixel size: {self.pixel_width}x{self.pixel_width}")
         self.background = []
         self.foreground = []
+        self.layers = [self.background, self.foreground]
         for y in range(self.height):
+            y += 1
             self.background.append([pygame.Color(min(y*2, 255), min(y*5, 255), min(y*8, 255), 255)] * self.width)
             self.foreground.append([CLEAR] * self.width)
 
-        self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  #  | pygame.SCALED | pygame.NOFRAME
+        self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
         pygame.event.set_grab(True)
         self.running = True
 
@@ -213,82 +217,44 @@ class Pixelate:
             self.paint()
         pygame.quit()
 
-    def set_color(self, x, y, color):
+    def set_color(self, x, y, color, layer=1):
         if x < 0 or x >= self.width or y < 0 or y >= self.height:
             return
-        self.foreground[y][x] = color
+        if layer < 0 or layer >= len(self.layers):
+            return
+        self.layers[layer][y][x] = color
 
     @with_lock
-    def draw_shape(self, x, y, shape, color, invert=False):
-        #print(x, y, shape)
-        for yoff in range(len(shape)):
-            for xoff in range(len(shape[0])):
-                if bool(shape[yoff][xoff]) != invert:
-                    self.set_color(x+xoff, y+yoff, color)
-                #else:
-                #    self.set_color(x+xoff, y+yoff, CLEAR)
-
-    @with_lock
-    def draw_surface(self, coord, surface: Surface):
+    def draw_surface(self, coord, surface: Surface, layer=1):
         x, y = coord
         w, h = surface.get_width(), surface.get_height()
-        #with pygame.PixelArray(surface) as pxarray:
         surface.lock()
         for yoff in range(h):
             cury = y + yoff
             for xoff in range(w):
                 curx = x + xoff
-                #color = pxarray[xoff, yoff]
-                #print(xoff, yoff, (color >> 24) & 0xFF, (color >> 16) & 0xFF, (color >> 8) & 0xFF, color & 0xFF)
-                #alpha = (color >> 24) & 0xFF
-                #color = surface.get_at_mapped((xoff, yoff))
-                #color = surface.unmap_rgb(color)
                 color = surface.get_at((xoff, yoff))
                 if color == surface.get_colorkey() or color.a == 0:
                     continue
-                self.set_color(curx, cury, color)
+                self.set_color(curx, cury, color, layer)
         surface.unlock()
 
-    def clear_box(self, x, y, width, height):
-        row = [ 1 ] * width
-        shape = [ row ] * height
-        self.draw_shape(x, y, shape, CLEAR)
-
-    def draw_chr(self, x, y, char, color, shadow=None):
-        shadow_height = 0
-        if shadow is not None:
-            shadow_height += 1
-        shape = Font3x5.get(char)
-        #print(char)
-        self.clear_box(x, y, len(shape[0]), len(shape) + shadow_height)
-        if shadow:
-            self.draw_shape(x, y+1, shape, shadow)
-        self.draw_shape(x, y, shape, color)
-
-    def draw_str(self, x, y, msg, color, shadow=None):
-        for c in msg:
-            self.draw_chr(x, y, c, color, shadow)
-            x += 4
+    def fill(self, rect: pygame.Rect, color, layer=1):
+        for y in range(rect.y, rect.y + rect.height):
+            for x in range(rect.x, rect.x + rect.width):
+                self.set_color(x, y, color, layer)
 
     @with_lock
     def paint(self):
-        pixel = pygame.Surface((self.pixel_width, self.pixel_width), pygame.SRCALPHA)
+        px = SquarePixel(self.pixel_width)
+        #px = RoundPixel(self.pixel_width)
+        px.inner_border_color = px.outer_border_color
         for y in range(self.height):
             for x in range(self.width):
                 coord = (x*self.pixel_width, y*self.pixel_width, self.pixel_width, self.pixel_width)
-                #color = self.foreground[y][x]
-                #if color == CLEAR:
-                #    color = self.background[y][x]
-                #pixel.fill(self.background[y][x])
+                pixel = px.render(self.foreground[y][x], (0, 0, 0))
                 pygame.draw.rect(self.screen, self.background[y][x], coord)
-                pixel.fill(self.foreground[y][x])
-                pygame.draw.rect(pixel, pygame.Color(40, 40, 40), (0, 0, self.pixel_width, self.pixel_width), width=2)
-                pygame.draw.rect(pixel, pygame.Color(0, 0, 0), (0, 0, self.pixel_width, self.pixel_width), width=1)
-                #pygame.draw.rect(self.screen, self.foreground[y][x], coord)
-                #pygame.draw.rect(self.screen, pygame.Color(40, 40, 40), coord, width=2)
-                #pygame.draw.rect(self.screen, pygame.Color(0, 0, 0), coord, width=1)
                 self.screen.blit(pixel, coord)
-            #pygame.draw.
         pygame.display.flip()
 
 
@@ -309,27 +275,37 @@ def get_fonts():
 
 def app(pxl8: Pixelate):
     try:
+        if os.path.exists("mountain-cabin.png"):
+            pxl8.draw_surface((0, 0), pygame.image.load("mountain-cabin.png"), layer=0)
         fonts = get_fonts()
         i = 0
         interval = 10
         while pxl8.running:
             if i % interval == 0:
                 font = fonts[(i // interval) % len(fonts)]
-            msg = time.strftime("%e %b")
+            msg = time.strftime("%e %b").strip()
             with pxl8.lock:
-                pxl8.clear_box(0, 0, pxl8.width, pxl8.height)
+                pxl8.fill(pygame.Rect(0, 0, pxl8.width, pxl8.height), CLEAR)
                 shadow = font.render(msg, 0, (80, 80, 80))
                 line = font.render(msg, 0, WHITE)
-                x = pxl8.width // 2 - (line.get_width()) // 2
-                y = pxl8.height // 2 - font.get_linesize()
-                pxl8.draw_surface((x+1, y), shadow)
+                #x = pxl8.width // 2 - (line.get_width()) // 2
+                #y = pxl8.height // 2 - font.get_linesize()
+                x = 1
+                y = pxl8.height - font.get_linesize() * 2
+                pxl8.draw_surface((x+1, y+1), shadow)
+                #for sy in range(y-1, y+2):
+                #    for sx in range(x-1, x+2):
+                #        pxl8.draw_surface((sx, sy), shadow)
                 pxl8.draw_surface((x, y), line)
                 y += font.get_linesize()
-                msg = time.strftime("%I:%M %p").lower().lstrip('0')
+                if i % 2 == 0:
+                    msg = time.strftime("%I:%M %p").lower().lstrip('0')
+                else:
+                    msg = time.strftime("%I %M %p").lower().lstrip('0')
                 shadow = font.render(msg, 0, (80, 80, 80))
                 line = font.render(msg, 0, WHITE)
                 x = pxl8.width // 2 - (line.get_width()) // 2
-                pxl8.draw_surface((x+1, y), shadow)
+                pxl8.draw_surface((x+1, y+1), shadow)
                 pxl8.draw_surface((x, y), line)
             time.sleep(1)
             i += 1
