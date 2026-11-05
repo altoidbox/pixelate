@@ -132,6 +132,8 @@ def get_fonts():
         'PressStart2P-Regular.ttf': 8,
         'PixelifySans-Regular.ttf': 10,
         'Tiny5-Regular.ttf': 12,
+        'Micro5-Regular.ttf': 14,
+        'Jersey10-Regular.ttf': 18,
     }
     for font_path in Path('./fonts').glob('*.ttf'):
         size = size_maps.get(font_path.name, 12)

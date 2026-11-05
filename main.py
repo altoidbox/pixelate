@@ -68,11 +68,13 @@ class Pixelate:
         print(f"Pixel size: {self.pixel_width}x{self.pixel_width}")
         self.background = []
         self.foreground = []
+        self.dirty = []
         self.layers = [self.background, self.foreground]
         for y in range(self.height):
             y += 1
             self.background.append([pygame.Color(min(y*2, 255), min(y*5, 255), min(y*8, 255), 255)] * self.width)
             self.foreground.append([CLEAR] * self.width)
+            self.dirty.append([True] * self.width)
 
         self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
         pygame.event.set_grab(True)
@@ -99,6 +101,7 @@ class Pixelate:
         if layer < 0 or layer >= len(self.layers):
             return
         self.layers[layer][y][x] = color
+        self.dirty[y][x] = True
 
     @with_lock
     def draw_surface(self, coord, surface: Surface, layer=1):
@@ -127,6 +130,9 @@ class Pixelate:
         px.inner_border_color = px.outer_border_color
         for y in range(self.height):
             for x in range(self.width):
+                if not self.dirty[y][x]:
+                    continue
+                self.dirty[y][x] = False
                 coord = (x*self.pixel_width, y*self.pixel_width, self.pixel_width, self.pixel_width)
                 pixel = px.render(self.foreground[y][x], (0, 0, 0))
                 pygame.draw.rect(self.screen, self.background[y][x], coord)
@@ -144,20 +150,26 @@ def app(pxl8: Pixelate):
         while pxl8.running:
             if i % interval == 0:
                 font = fonts[(i // interval) % len(fonts)]
-            msg = time.strftime("%e %b").strip()
+            msg = time.strftime("%e %b")
             with pxl8.lock:
                 pxl8.fill(pygame.Rect(0, 0, pxl8.width, pxl8.height), CLEAR)
-                line = text.text_shadows(font, msg, WHITE, pygame.Color(0, 0, 0, 127), offsets=[(0, 1), (1, 0), (0, -1), (-1, 0)])
-                x = 0
-                y = pxl8.height - font.get_linesize() * 2 - 2
-                pxl8.draw_surface((x, y), line)
-                y += font.get_linesize() + 1
+                #line = text.text_shadows(font, msg, WHITE, pygame.Color(0, 0, 0, 127), offsets=[(0, 1), (1, 0), (0, -1), (-1, 0)])
+                dateline = text.text_shadow(font, msg, WHITE, pygame.Color(80, 80, 80, 180))
                 if i % 2 == 0:
-                    msg = time.strftime("%I:%M %p").lower().lstrip('0')
+                    msg = time.strftime("%I:%M %p").lower()
                 else:
-                    msg = time.strftime("%I %M %p").lower().lstrip('0')
-                line = text.text_shadow(font, msg, WHITE, pygame.Color(80, 80, 80, 180))
-                pxl8.draw_surface((x, y), line)
+                    msg = time.strftime("%I %M %p").lower()
+                if msg.startswith('0'):
+                    msg = ' ' + msg[1:]
+                timeline = text.text_shadow(font, msg, WHITE, pygame.Color(80, 80, 80, 180))
+                overlay = pygame.Surface((pxl8.width, dateline.get_height() + timeline.get_height() + 2), pygame.SRCALPHA)
+                overlay.fill((0, 0, 0, 80))
+                x = 1
+                y = pxl8.height - font.get_linesize() * 2 - 2
+                pxl8.draw_surface((0, y-1), overlay)
+                pxl8.draw_surface((x, y), dateline)
+                y += font.get_linesize() + 1
+                pxl8.draw_surface((x, y), timeline)
             time.sleep(1)
             i += 1
     finally:
