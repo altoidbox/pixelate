@@ -41,6 +41,10 @@ class RoundPixel:
         return surface
 
 
+def iter_rect(rect: pygame.Rect):
+    return ((x, y) for x in range(rect.left, rect.right) for y in range(rect.top, rect.bottom))
+
+
 def with_lock(func):
     def _func_with_lock(*args, **kwargs):
         nonlocal func
@@ -62,81 +66,90 @@ class Pixelate:
         self.width = 64
         self.pixel_width = screen_width // self.width
         self.height = screen_height // self.pixel_width
+        self.rect = pygame.Rect(0, 0, self.width, self.height)
 
         print(f"Displ size: {screen_width}x{screen_height}")
         print(f"Pixel disp: {self.width}x{self.height}")
         print(f"Pixel size: {self.pixel_width}x{self.pixel_width}")
         self.background = []
         self.foreground = []
-        self.dirty = []
+        self.dirty = set()
+        self.needs_redraw = True
         self.layers = [self.background, self.foreground]
         for y in range(self.height):
             y += 1
             self.background.append([pygame.Color(min(y*2, 255), min(y*5, 255), min(y*8, 255), 255)] * self.width)
             self.foreground.append([CLEAR] * self.width)
-            self.dirty.append([True] * self.width)
 
         self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
         pygame.event.set_grab(True)
         self.running = True
+
+    @staticmethod
+    def is_quit_event(event: pygame.event.Event):
+        if event.type == pygame.QUIT:
+            return True
+        elif event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                return True
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            return True
+        return False
 
     def run(self):
         self.running = True
         while self.running:
             self.clock.tick(30)
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.running = False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                        self.running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
+                if self.is_quit_event(event):
                     self.running = False
             self.paint()
         pygame.quit()
 
-    def set_color(self, x, y, color, layer=1):
-        if x < 0 or x >= self.width or y < 0 or y >= self.height:
-            return
+    @with_lock
+    def set_color(self, coord, color, layer=1):
+        x, y = coord
         if layer < 0 or layer >= len(self.layers):
             return
+        if not self.rect.collidepoint(coord):
+            return
         self.layers[layer][y][x] = color
-        self.dirty[y][x] = True
+        self.dirty.add(coord)
 
     @with_lock
     def draw_surface(self, coord, surface: Surface, layer=1):
         x, y = coord
-        w, h = surface.get_width(), surface.get_height()
         surface.lock()
-        for yoff in range(h):
-            cury = y + yoff
-            for xoff in range(w):
-                curx = x + xoff
-                color = surface.get_at((xoff, yoff))
-                if color == surface.get_colorkey() or color.a == 0:
-                    continue
-                self.set_color(curx, cury, color, layer)
+        for point in iter_rect(surface.get_rect()):
+            color = surface.get_at(point)
+            if color == surface.get_colorkey() or color.a == 0:
+                continue
+            self.set_color((point[0] + x, point[1] + y), color, layer)
         surface.unlock()
 
+    @with_lock
     def fill(self, rect: pygame.Rect, color, layer=1):
-        for y in range(rect.y, rect.y + rect.height):
-            for x in range(rect.x, rect.x + rect.width):
-                self.set_color(x, y, color, layer)
+        for coord in iter_rect(rect):
+            self.set_color(coord, color, layer)
 
     @with_lock
     def paint(self):
         px = SquarePixel(self.pixel_width)
         #px = RoundPixel(self.pixel_width)
         px.inner_border_color = px.outer_border_color
-        for y in range(self.height):
-            for x in range(self.width):
-                if not self.dirty[y][x]:
-                    continue
-                self.dirty[y][x] = False
-                coord = (x*self.pixel_width, y*self.pixel_width, self.pixel_width, self.pixel_width)
-                pixel = px.render(self.foreground[y][x], (0, 0, 0))
-                pygame.draw.rect(self.screen, self.background[y][x], coord)
-                self.screen.blit(pixel, coord)
+        if self.needs_redraw:
+            draw_set = iter_rect(pygame.Rect(0, 0, self.width, self.height))
+        elif self.dirty:
+            draw_set = self.dirty
+        else:
+            return
+        self.dirty = set()
+        self.needs_redraw = False
+        for (x, y) in draw_set:
+            coord = (x*self.pixel_width, y*self.pixel_width, self.pixel_width, self.pixel_width)
+            pixel = px.render(self.foreground[y][x], (0, 0, 0))
+            pygame.draw.rect(self.screen, self.background[y][x], coord)
+            self.screen.blit(pixel, coord)
         pygame.display.flip()
 
 
@@ -166,7 +179,7 @@ def app(pxl8: Pixelate):
                 overlay.fill((0, 0, 0, 80))
                 x = 1
                 y = pxl8.height - font.get_linesize() * 2 - 2
-                pxl8.draw_surface((0, y-1), overlay)
+                #pxl8.draw_surface((0, y-1), overlay)
                 pxl8.draw_surface((x, y), dateline)
                 y += font.get_linesize() + 1
                 pxl8.draw_surface((x, y), timeline)
