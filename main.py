@@ -113,6 +113,8 @@ class Pixelate:
             return
         if not self.rect.collidepoint(coord):
             return
+        if self.layers[layer][y][x] == color:
+            return
         self.layers[layer][y][x] = color
         self.dirty.add(coord)
 
@@ -175,10 +177,10 @@ def app(pxl8: Pixelate):
                 if msg.startswith('0'):
                     msg = ' ' + msg[1:]
                 timeline = text.text_shadow(font, msg, WHITE, pygame.Color(80, 80, 80, 180))
-                overlay = pygame.Surface((pxl8.width, dateline.get_height() + timeline.get_height() + 2), pygame.SRCALPHA)
-                overlay.fill((0, 0, 0, 80))
                 x = 1
                 y = pxl8.height - font.get_linesize() * 2 - 2
+                #overlay = pygame.Surface((pxl8.width, dateline.get_height() + timeline.get_height() + 2), pygame.SRCALPHA)
+                #overlay.fill((0, 0, 0, 80))
                 #pxl8.draw_surface((0, y-1), overlay)
                 pxl8.draw_surface((x, y), dateline)
                 y += font.get_linesize() + 1
