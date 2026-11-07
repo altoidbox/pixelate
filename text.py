@@ -10,7 +10,17 @@ def draw_shape(pxarray: pygame.PixelArray, shape, coord, color):
                 pxarray[x + xoff, y + yoff] = color
 
 
-class Font3x5(pygame.font.Font):
+class Font(pygame.font.Font):
+    def __init__(self, name=None, size=12):
+        super().__init__(name, size)
+        self.name = name
+        self.point_size = size
+
+    def with_size(self, size):
+        return self.__class__(self.name, size)
+
+
+class Font3x5(Font):
     CHR_WIDTH = 3
     CHR_HEIGHT = 5
     FONT = [
@@ -68,7 +78,7 @@ class Font3x5(pygame.font.Font):
         return 2 if self.underline else 0
 
     def get_linesize(self):
-        return self.get_height() + 2
+        return self.get_height() + 1
 
     def render(self, text: str, antialias, color, background=None) -> pygame.Surface:
         fixed_width, fixed_height = self.size(text)
@@ -93,13 +103,13 @@ class Font3x5(pygame.font.Font):
         return canvas
 
 
-class Font6x10(pygame.font.Font):
+class Font6x10(Font):
     CHR_WIDTH = 6
     CHR_HEIGHT = 10
     
-    def __init__(self):
-        super().__init__()
-        self.source = Font3x5()
+    def __init__(self, *args, **kwwargs):
+        super().__init__(*args, **kwwargs)
+        self.source = Font3x5(*args, **kwwargs)
 
     def size(self, text):
         self.source.underline = self.underline
@@ -124,24 +134,45 @@ class Font6x10(pygame.font.Font):
         return pygame.transform.scale_by(surface, 2)
 
 
-def get_fonts():
-    fonts = []
+LOADED_FONTS = {}
+
+
+def get_fonts() -> list[tuple[str, int]]:
     #fonts += [Font3x5()]
     #fonts += [Font6x10()]
     size_maps = {
-        'PressStart2P-Regular.ttf': 8,
-        'PixelifySans-Regular.ttf': 10,
-        'Tiny5-Regular.ttf': 12,
-        'Micro5-Regular.ttf': 14,
-        'Jersey10-Regular.ttf': 18,
+        'PressStart2P-Regular.ttf': [8],  # *8*: [7x7]
+        'PixelifySans-Regular.ttf': [11],  # *11*: [5x7], 19: [9x12]
+        'Tiny5-Regular.ttf': [8, 16],  # *8*: ~[3x5], *16*: [6x10]
+        'Micro5-Regular.ttf': [10, 16, 21],  # *10*: ~[3x5], 14: [4x6], *16*: [4x8], *21*: [6x10]
+        'Jersey10-Regular.ttf': [18],  # 9: bad kerning, *18*: ~[7x9]
+        'Bytesized-Regular.ttf': [8, 12, 16],  # *8*: [3x4], *12*: [5x7], *16*: [6x8]
+        'JacquardaBastarda9-Regular.ttf': [12],  # *12*: [5x10], 19: [bigish] 23: [big]
+        'Silkscreen-Regular.ttf': [8, 15, 16],  # *8*: [4x5], 15: [7x10], 16: [8x10] - wide kerning
+        'VT323-Regular.ttf': [20],  # 20: [6x11]
     }
-    for font_path in Path('./fonts').glob('*.ttf'):
-        size = size_maps.get(font_path.name, 12)
-        fonts.append(pygame.font.Font(str(font_path), size))
+    fonts = []
+    for font_path in sorted(Path('./fonts').glob('*.ttf')):
+        sizes = size_maps.get(font_path.name, [12])
+        for size in sizes:
+            fonts.append((font_path.name, size))
+            #font = Font(str(font_path), size)
+            #print(font.name, 's:', font.point_size, 'h:', font.get_height(), 'l:', font.get_linesize(), 'a:', font.get_ascent(), 'd:', font.get_descent())
+
     return fonts
 
 
-def text_shadow(font: pygame.font.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)):
+def get_font(name, size):
+    if (name, size) in LOADED_FONTS:
+        return LOADED_FONTS[(name, size)]
+    path = Path(name)
+    if not path.exists():
+        path = Path('./fonts') / name
+    LOADED_FONTS[(name, size)] = font = Font(str(path), size)
+    return font
+
+
+def text_shadow(font: pygame.font.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)) -> pygame.Surface:
     foreground = font.render(text, 0, color)
     shadow = font.render(text, 0, shadow_color)
     shadow.set_alpha(shadow_color.a)
