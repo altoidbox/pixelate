@@ -184,16 +184,18 @@ class ClockApp:
         self.fonts = text.get_fonts()
         self.font_index = 0
         self.font = text.get_font('PressStart2P-Regular.ttf', 8)
+        self.text_color = WHITE
+        self.shadow_color = pygame.Color(80, 80, 80, 180)
         self.alignment = (Alignment.RIGHT, Alignment.BOTTOM)
         if os.path.exists("mountain-cabin.png"):
             pxl8.draw_surface((0, 0), pygame.image.load("mountain-cabin.png"), layer=0)
     
-    def align(self, rect: pygame.Rect, padding=1, offset=None, rel_to=None):
+    def align(self, alignment, rect: pygame.Rect, padding=0, offset=(0, 0), rel_to=None):
         if rel_to is None:
             rel_to = self.pxl8.rect
         if padding:
             rel_to = rel_to.inflate(-2*padding, -2*padding)
-        match self.alignment:
+        match alignment:
             case (Alignment.LEFT, Alignment.TOP):
                 rect.topleft = rel_to.topleft
             case (Alignment.LEFT, Alignment.CENTER):
@@ -212,63 +214,50 @@ class ClockApp:
                 rect.center = rel_to.center
             case (Alignment.CENTER, Alignment.BOTTOM):
                 rect.midbottom = rel_to.midbottom
-        return rect.move(offset or (0, 0))
+        return rect.move(offset)
+
+    def render_text(self, msg) -> pygame.Surface:
+        surf = text.text_shadow(self.font, msg, self.text_color, self.shadow_color)
+        r = surf.get_rect()
+        r.inflate_ip((-1, 0))
+        return surf.subsurface(r)
+
+    def draw_time(self):
+        curtime = time.localtime()
+        dateline = self.render_text(time.strftime("%e %b", curtime).strip())
+        hour = self.render_text(time.strftime("%I", curtime).lstrip('0'))
+        colon = self.render_text(':')
+        minutes = self.render_text(time.strftime("%M", curtime))
+        ampm = self.render_text(time.strftime("%p", curtime).lower())
+        size = (hour.get_width() + colon.get_width()*2 + minutes.get_width() + ampm.get_width(), hour.get_height())
+        timeline = pygame.Surface(size, pygame.SRCALPHA)
+        timeline.fill(CLEAR)
+        timeline.blit(hour, (0, 0))
+        offset = hour.get_width()
+        if curtime.tm_sec % 2 == 0:
+            timeline.blit(colon, (offset, 0))
+        offset += colon.get_width()
+        timeline.blit(minutes, (offset, 0))
+        offset += minutes.get_width() + colon.get_width()
+        timeline.blit(ampm, (offset, 0))
+        dlbounds = dateline.get_bounding_rect()
+        tlbounds = timeline.get_bounding_rect()
+        dateline2 = dateline.subsurface(dlbounds)
+        timeline2 = timeline.subsurface(tlbounds)
+        combined = pygame.Surface((max(dateline2.get_width(), timeline2.get_width()), dlbounds.height + tlbounds.height + 1), pygame.SRCALPHA)
+        combined_rect = combined.get_rect()
+        combined.fill(CLEAR)
+        rect = self.align((self.alignment[0], Alignment.TOP), dlbounds, offset=(0, 0), rel_to=combined_rect)
+        combined.blit(dateline2, rect.topleft)
+        rect = self.align((self.alignment[0], Alignment.TOP), tlbounds, offset=(0, dlbounds.height + 1), rel_to=combined_rect)
+        combined.blit(timeline2, rect.topleft)
+        return combined
 
     def update_time(self, event=None):
         self.pxl8.fill(self.pxl8.rect, CLEAR)
-        #self.pxl8.fill(self.pxl8.rect, self.pxl8.styles[0], layer=2)
-        #line = text.text_shadows(font, msg, WHITE, pygame.Color(0, 0, 0, 127), offsets=[(0, 1), (1, 0), (0, -1), (-1, 0)])
-        curtime = time.localtime()
-        msg = time.strftime("%e %b", curtime)
-        dateline = text.text_shadow(self.font, msg, WHITE, pygame.Color(80, 80, 80, 180))
-        #dateline = self.font.render(msg, 0, WHITE)
-        if curtime.tm_sec % 2 == 0:
-            format = "%I:%M %p"
-        else:
-            format = "%I %M %p"
-        msg = time.strftime(format, curtime).lower()
-        if msg.startswith('0'):
-            msg = ' ' + msg[1:]
-        timeline = text.text_shadow(self.font, msg, WHITE, pygame.Color(80, 80, 80, 180))
-        #timeline = self.font.render(msg, 0, WHITE)
-        dlbounds = dateline.get_bounding_rect()
-        tlbounds = timeline.get_bounding_rect()
-        #combined = pygame.Surface((max(dlbounds.width, tlbounds.width), dlbounds.height + tlbounds.height + 1), pygame.SRCALPHA)
-        combined = pygame.Surface((max(dateline.get_width(), timeline.get_width()), dlbounds.height + tlbounds.height + 1), pygame.SRCALPHA)
-        combined_rect = combined.get_rect()
-        combined.fill(CLEAR)
-        if self.alignment[0] == Alignment.LEFT:
-            combined.blit(dateline, (0, -dlbounds.top))
-            combined.blit(timeline, (0, dlbounds.height + 1 - tlbounds.top))
-        elif self.alignment[0] == Alignment.RIGHT:
-            combined.blit(dateline, (combined_rect.width - dateline.get_width(), -dlbounds.top))
-            combined.blit(timeline, (combined_rect.width - timeline.get_width(), dlbounds.height + 1 - tlbounds.top))
-        elif self.alignment[0] == Alignment.CENTER:
-            combined.blit(dateline, (combined_rect.width // 2 - dateline.get_width() // 2, -dlbounds.top))
-            combined.blit(timeline, (combined_rect.width // 2 - timeline.get_width() // 2, dlbounds.height + 1 - tlbounds.top))
-        rect = self.align(combined_rect, padding=0)
-        self.pxl8.draw_surface(rect.topleft, combined)
-        return
-        if self.alignment[1] == Alignment.TOP:
-            self.pxl8.draw_surface((0, 0), combined)
-        elif self.alignment[1] == Alignment.BOTTOM:
-            self.pxl8.draw_surface((0, self.pxl8.height - combined.get_height()), combined)
-        elif self.alignment[1] == Alignment.CENTER:
-            self.pxl8.draw_surface((0, self.pxl8.height // 2 - combined.get_height() // 2), combined)
-        return
-
-        x = 1
-        y = self.pxl8.height - (tlbounds.height + dlbounds.height + 1)
-        #overlay = pygame.Surface((pxl8.width, dateline.get_height() + timeline.get_height() + 2), pygame.SRCALPHA)
-        #overlay.fill((0, 0, 0, 80))
-        #pxl8.draw_surface((0, y-1), overlay)
-        dateline.get_rect(right=self.pxl8.width - 1)
-        self.pxl8.draw_surface((x, y - dlbounds.top), dateline)
-        #self.pxl8.style_surface((x, y - dlbounds.top), dateline, self.pxl8.styles[1])
-        #y += self.font.get_linesize() + 1
-        y += dlbounds.height + 1
-        self.pxl8.draw_surface((x, y - tlbounds.top), timeline)
-        #self.pxl8.style_surface((x, y - tlbounds.top), timeline, self.pxl8.styles[1])
+        surface = self.draw_time2()
+        rect = self.align(self.alignment, surface.get_rect(), padding=1)
+        self.pxl8.draw_surface(rect.topleft, surface)
 
     def key_press(self, event):
         if event.key == pygame.K_j:
