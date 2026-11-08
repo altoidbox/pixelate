@@ -56,6 +56,76 @@ def iter_rect(rect: pygame.Rect):
     return ((x, y) for x in range(rect.left, rect.right) for y in range(rect.top, rect.bottom))
 
 
+def join_horizontal(surfaces, yalignment=Alignment.TOP, xpadding=0):
+    if len(surfaces) == 1:
+        return surfaces[0]
+    width = sum(surf.get_width() for surf in surfaces) + (xpadding * (len(surfaces) - 1))
+    height = max(surf.get_height() for surf in surfaces)
+    full_surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    full_surface.fill(CLEAR)
+    full_rect = full_surface.get_rect()
+    x = 0
+    for surf in surfaces:
+        loc = align_surface((Alignment.LEFT, yalignment), surf, rel_to=full_rect, offset=(x, 0))
+        full_surface.blit(surf, loc.topleft)
+        x += surf.get_width() + xpadding
+    return full_surface
+
+
+def join_vertical(surfaces, xalignment=Alignment.LEFT, ypadding=0):
+    if len(surfaces) == 1:
+        return surfaces[0]
+    width = max(surf.get_width() for surf in surfaces)
+    height = sum(surf.get_height() for surf in surfaces) + (ypadding * (len(surfaces) - 1))
+    full_surface = pygame.Surface((width, height), pygame.SRCALPHA)
+    full_surface.fill(CLEAR)
+    full_rect = full_surface.get_rect()
+    y = 0
+    for surf in surfaces:
+        loc = align_surface((xalignment, Alignment.TOP), surf, rel_to=full_rect, offset=(0, y))
+        full_surface.blit(surf, loc.topleft)
+        y += surf.get_height() + ypadding
+    return full_surface
+
+
+def prepare_surface(lines, xalignment=Alignment.LEFT):
+    surf_lines = [join_horizontal(line) for line in lines]
+    return join_vertical(surf_lines, xalignment)
+
+
+def align_surface(alignment, rect: pygame.Rect|pygame.Surface, rel_to: pygame.Rect|pygame.Surface, padding=0, offset=(0, 0)):
+    if isinstance(rel_to, pygame.Surface):
+        rel_to = rel_to.get_rect()
+    if isinstance(rect, pygame.Surface):
+        rect = rect.get_rect()
+    else:
+        rect = rect.copy()
+    if padding:
+        rel_to = rel_to.inflate(-2*padding, -2*padding)
+    match alignment:
+        case (Alignment.LEFT, Alignment.TOP):
+            rect.topleft = rel_to.topleft
+        case (Alignment.LEFT, Alignment.CENTER):
+            rect.midleft = rel_to.midleft
+        case (Alignment.LEFT, Alignment.BOTTOM):
+            rect.bottomleft = rel_to.bottomleft
+        case (Alignment.RIGHT, Alignment.TOP):
+            rect.topright = rel_to.topright
+        case (Alignment.RIGHT, Alignment.CENTER):
+            rect.midright = rel_to.midright
+        case (Alignment.RIGHT, Alignment.BOTTOM):
+            rect.bottomright = rel_to.bottomright
+        case (Alignment.CENTER, Alignment.TOP):
+            rect.midtop = rel_to.midtop
+        case (Alignment.CENTER, Alignment.CENTER):
+            rect.center = rel_to.center
+        case (Alignment.CENTER, Alignment.BOTTOM):
+            rect.midbottom = rel_to.midbottom
+    rect.move_ip(offset)
+    return rect
+
+
+
 def with_lock(func):
     def _func_with_lock(*args, **kwargs):
         nonlocal func
@@ -66,22 +136,96 @@ def with_lock(func):
 
 
 class Pixelate:
-    def __init__(self, width=64):
-        pygame.init()
+    DEFAULT_WIDTH = 64
+    REQUIRED_EVENTS = (pygame.KEYDOWN, pygame.QUIT)
+
+    def __init__(self, preferred_width=None, preferred_height=None):
         self.lock = threading.RLock()
-        self.clock = pygame.time.Clock()
-
+        pygame.init()
         pygame.display.init()
-        screen_width, screen_height = pygame.display.get_desktop_sizes()[0]
+        self.screen_width, self.screen_height = pygame.display.get_desktop_sizes()[0]
+        self.preferred_width = preferred_width
+        self.preferred_height = preferred_height
 
-        self.width = width
-        self.pixel_width = screen_width // self.width
-        self.height = screen_height // self.pixel_width
+        self.clock = pygame.time.Clock()
+        self.apps = set()
+        self.displays = {}
+        self.next_display_id = 0
+        self.active_display = self.create_display(self)
+        self.active_app: PixelateApp = None
+        print(f"Displ size: {self.screen_width}x{self.screen_height}")
+        print(f"Pixel disp: {self.active_display.width}x{self.active_display.height}")
+        print(f"Pixel size: {self.active_display.pixel_width}x{self.active_display.pixel_width}")
+        self.running = False
+        self.screen = pygame.display.set_mode(size=(self.screen_width, self.screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
+        self.switch_app(PixelateApp(self))
+
+    def create_display(self, owner, preferred_width=None, preferred_height=None):
+        if preferred_width is None and preferred_height is None:
+            preferred_width = self.preferred_width
+            preferred_height = self.preferred_height
+        ident = self.next_display_id
+        self.next_display_id += 1
+        new_display = PixelateDisplay(owner, ident, self.screen_width, self.screen_height, preferred_width, preferred_height)
+        self.displays[ident] = new_display
+        return new_display
+
+    @staticmethod
+    def is_quit_event(event: pygame.event.Event):
+        if event.type == pygame.QUIT:
+            return True
+        elif event.type == pygame.KEYDOWN:
+            if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                return True
+        return False
+
+    def switch_app(self, app: 'PixelateApp'):
+        if app is self.active_app:
+            return
+        if self.active_app is not None:
+            self.active_app.deactivate()
+        if app not in self.apps:
+            self.apps.add(app)
+        self.active_app = app
+        pygame.event.set_blocked(None)
+        pygame.event.set_allowed(self.REQUIRED_EVENTS)
+        self.active_app.activate()
+
+    def eventloop(self):
+        self.running = True
+        while self.running:
+            self.clock.tick(30)
+            event = pygame.event.wait()
+            while event.type != pygame.NOEVENT:
+                if self.is_quit_event(event):
+                    self.running = False
+                else:
+                    self.active_app.handle_event(event)
+                event = pygame.event.poll()
+            self.active_display.paint(self.screen)
+            pygame.display.flip()
+        pygame.quit()
+
+
+class PixelateDisplay:
+    def __init__(self, owner, ident, screen_width, screen_height, preferred_width=None, preferred_height=None):
+        self.owner = owner
+        self.id = ident
+        self.lock = threading.RLock()
+
+        if preferred_width is None and preferred_height is None:
+            preferred_width = Pixelate.DEFAULT_WIDTH
+
+        if preferred_width is not None:
+            self.width = preferred_width
+            self.pixel_width = screen_width // self.width
+            self.height = screen_height // self.pixel_width
+        elif preferred_height is not None:
+            self.height = preferred_height
+            self.pixel_width = screen_height // self.height
+            self.width = screen_width // self.pixel_width
         self.rect = pygame.Rect(0, 0, self.width, self.height)
 
-        print(f"Displ size: {screen_width}x{screen_height}")
-        print(f"Pixel disp: {self.width}x{self.height}")
-        print(f"Pixel size: {self.pixel_width}x{self.pixel_width}")
         self.background = []
         self.foreground = []
         self.style = []
@@ -94,32 +238,6 @@ class Pixelate:
             self.background.append([pygame.Color(min(y*2, 255), min(y*5, 255), min(y*8, 255), 255)] * self.width)
             self.foreground.append([CLEAR] * self.width)
             self.style.append([self.styles[0]] * self.width)
-
-        self.screen = pygame.display.set_mode(size=(screen_width, screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
-        self.running = True
-
-    @staticmethod
-    def is_quit_event(event: pygame.event.Event):
-        if event.type == pygame.QUIT:
-            return True
-        elif event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                return True
-        return False
-
-    def eventloop(self):
-        self.running = True
-        while self.running:
-            self.clock.tick(30)
-            event = pygame.event.wait()
-            while event.type != pygame.NOEVENT:
-                if self.is_quit_event(event):
-                    self.running = False
-                else:
-                    yield event
-                event = pygame.event.poll()
-            self.paint()
-        pygame.quit()
 
     @with_lock
     def set_color(self, coord, color, layer=1):
@@ -134,13 +252,15 @@ class Pixelate:
         self.dirty.add(coord)
 
     @with_lock
-    def draw_surface(self, coord, surface: Surface, layer=1):
+    def draw_surface(self, coord, surface: Surface, layer=1, ignore_clear=True):
         x, y = coord
         surface.lock()
         for point in iter_rect(surface.get_rect()):
             color = surface.get_at(point)
             if color == surface.get_colorkey() or color.a == 0:
-                continue
+                if ignore_clear:
+                    continue
+                color = CLEAR
             self.set_color((point[0] + x, point[1] + y), color, layer)
         surface.unlock()
 
@@ -161,7 +281,7 @@ class Pixelate:
             self.set_color(coord, color, layer)
 
     @with_lock
-    def paint(self):
+    def paint(self, screen: pygame.Surface):
         if self.needs_redraw:
             draw_set = iter_rect(pygame.Rect(0, 0, self.width, self.height))
         elif self.dirty:
@@ -173,48 +293,77 @@ class Pixelate:
         for (x, y) in draw_set:
             coord = (x*self.pixel_width, y*self.pixel_width, self.pixel_width, self.pixel_width)
             pixel = self.style[y][x].render(self.foreground[y][x], (0, 0, 0))
-            pygame.draw.rect(self.screen, self.background[y][x], coord)
-            self.screen.blit(pixel, coord)
-        pygame.display.flip()
+            pygame.draw.rect(screen, self.background[y][x], coord)
+            screen.blit(pixel, coord)
 
 
-class ClockApp:
+class PixelateApp:
     def __init__(self, pxl8: Pixelate):
+        """
+        Called when the app is created.
+        You may want to register your app with the Pixelate instance here.
+        """
+        pass
+
+    def activate(self):
+        """
+        Called when the app is placed into the foreground.
+        """
+        pass
+
+    def deactivate(self):
+        """
+        Called when the app is placed into the background.
+        The app may want to reduce CPU when in the background.
+        e.g., a clock that blinks a cursor every second may just want to update its display each minute when in the background
+        """
+        pass
+
+    def handle_event(self, event: pygame.event.Event):
+        """
+        Called when an event occurs.
+        Most apps should be primarily event driven
+        """
+        pass
+
+    def close(self):
+        """
+        Called when the app is closed.
+        """
+        pass
+
+
+class ClockApp(PixelateApp):
+    def __init__(self, pxl8: Pixelate):
+        super().__init__(pxl8)
         self.pxl8 = pxl8
+        self.display = pxl8.create_display(self)
         self.fonts = text.get_fonts()
         self.font_index = 0
         self.font = text.get_font('PressStart2P-Regular.ttf', 8)
         self.text_color = WHITE
         self.shadow_color = pygame.Color(80, 80, 80, 180)
         self.alignment = (Alignment.RIGHT, Alignment.BOTTOM)
+        self.surfaces = [None, None]
+        self.surface_time = None
+        self.surface_index = 0
+        self.timer_event = pygame.event.custom_type()
+        self.event_map = {
+            self.timer_event: self.update_time,
+            pygame.KEYDOWN: self.key_press,
+            pygame.MOUSEBUTTONDOWN: self.mouse_down,
+        }
         if os.path.exists("mountain-cabin.png"):
-            pxl8.draw_surface((0, 0), pygame.image.load("mountain-cabin.png"), layer=0)
-    
-    def align(self, alignment, rect: pygame.Rect, padding=0, offset=(0, 0), rel_to=None):
-        if rel_to is None:
-            rel_to = self.pxl8.rect
-        if padding:
-            rel_to = rel_to.inflate(-2*padding, -2*padding)
-        match alignment:
-            case (Alignment.LEFT, Alignment.TOP):
-                rect.topleft = rel_to.topleft
-            case (Alignment.LEFT, Alignment.CENTER):
-                rect.midleft = rel_to.midleft
-            case (Alignment.LEFT, Alignment.BOTTOM):
-                rect.bottomleft = rel_to.bottomleft
-            case (Alignment.RIGHT, Alignment.TOP):
-                rect.topright = rel_to.topright
-            case (Alignment.RIGHT, Alignment.CENTER):
-                rect.midright = rel_to.midright
-            case (Alignment.RIGHT, Alignment.BOTTOM):
-                rect.bottomright = rel_to.bottomright
-            case (Alignment.CENTER, Alignment.TOP):
-                rect.midtop = rel_to.midtop
-            case (Alignment.CENTER, Alignment.CENTER):
-                rect.center = rel_to.center
-            case (Alignment.CENTER, Alignment.BOTTOM):
-                rect.midbottom = rel_to.midbottom
-        return rect.move(offset)
+            self.display.draw_surface((0, 0), pygame.image.load("mountain-cabin.png"), layer=0)
+
+    def activate(self):
+        self.pxl8.active_display = self.display
+        pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN])
+        self.update_time(force=True)
+        pygame.time.set_timer(self.timer_event, 1000)
+
+    def deactivate(self):
+        pygame.time.set_timer(self.timer_event, 0)
 
     def render_text(self, msg) -> pygame.Surface:
         surf = text.text_shadow(self.font, msg, self.text_color, self.shadow_color)
@@ -222,42 +371,36 @@ class ClockApp:
         r.inflate_ip((-1, 0))
         return surf.subsurface(r)
 
-    def draw_time(self):
-        curtime = time.localtime()
+    def draw_time(self, curtime):
         dateline = self.render_text(time.strftime("%e %b", curtime).strip())
         hour = self.render_text(time.strftime("%I", curtime).lstrip('0'))
         colon = self.render_text(':')
+        blank = pygame.Surface((colon.get_width(), hour.get_height()), pygame.SRCALPHA)
+        blank.fill(CLEAR)
         minutes = self.render_text(time.strftime("%M", curtime))
         ampm = self.render_text(time.strftime("%p", curtime).lower())
-        size = (hour.get_width() + colon.get_width()*2 + minutes.get_width() + ampm.get_width(), hour.get_height())
-        timeline = pygame.Surface(size, pygame.SRCALPHA)
-        timeline.fill(CLEAR)
-        timeline.blit(hour, (0, 0))
-        offset = hour.get_width()
-        if curtime.tm_sec % 2 == 0:
-            timeline.blit(colon, (offset, 0))
-        offset += colon.get_width()
-        timeline.blit(minutes, (offset, 0))
-        offset += minutes.get_width() + colon.get_width()
-        timeline.blit(ampm, (offset, 0))
+        with_colon = join_horizontal([hour, colon, minutes, blank, ampm])
+        without_colon = join_horizontal([hour, blank, minutes, blank, ampm])
         dlbounds = dateline.get_bounding_rect()
-        tlbounds = timeline.get_bounding_rect()
-        dateline2 = dateline.subsurface(dlbounds)
-        timeline2 = timeline.subsurface(tlbounds)
-        combined = pygame.Surface((max(dateline2.get_width(), timeline2.get_width()), dlbounds.height + tlbounds.height + 1), pygame.SRCALPHA)
-        combined_rect = combined.get_rect()
-        combined.fill(CLEAR)
-        rect = self.align((self.alignment[0], Alignment.TOP), dlbounds, offset=(0, 0), rel_to=combined_rect)
-        combined.blit(dateline2, rect.topleft)
-        rect = self.align((self.alignment[0], Alignment.TOP), tlbounds, offset=(0, dlbounds.height + 1), rel_to=combined_rect)
-        combined.blit(timeline2, rect.topleft)
-        return combined
+        dateline = dateline.subsurface(dlbounds)
+        surfaces = []
+        for timeline in [with_colon, without_colon]:
+            tlbounds = timeline.get_bounding_rect()
+            timeline = timeline.subsurface(tlbounds)
+            surfaces.append(join_vertical([dateline, timeline], xalignment=self.alignment[0], ypadding=1))
+        return surfaces
 
-    def update_time(self, event=None):
-        self.pxl8.fill(self.pxl8.rect, CLEAR)
-        surface = self.draw_time2()
-        rect = self.align(self.alignment, surface.get_rect(), padding=1)
-        self.pxl8.draw_surface(rect.topleft, surface)
+    def update_time(self, event=None, force=False):
+        curtime = time.localtime()
+        if force or self.surface_time != curtime[1:5]:
+            self.display.fill(self.display.rect, CLEAR)
+            self.surfaces = self.draw_time(curtime)
+            self.surface_time = curtime[1:5]
+        if event is not None and event.type == self.timer_event:
+            self.surface_index = (self.surface_index + 1) % len(self.surfaces)
+        surface = self.surfaces[self.surface_index]
+        rect = align_surface(self.alignment, surface, rel_to=self.display.rect, padding=1)
+        self.display.draw_surface(rect.topleft, surface, ignore_clear=False)
 
     def key_press(self, event):
         if event.key == pygame.K_j:
@@ -281,26 +424,30 @@ class ClockApp:
         else:
             return
         print(self.font.name, 's:', self.font.point_size, 'h:', self.font.get_height(), 'l:', self.font.get_linesize(), 'a:', self.font.get_ascent(), 'd:', self.font.get_descent())
-        self.update_time()
+        self.update_time(force=True)
 
     def mouse_down(self, event: pygame.event.Event):
         # translate mouse position to pixel grid position
         x, y = event.pos
-        x = x // self.pxl8.pixel_width
-        y = y // self.pxl8.pixel_width
-        if event.button == 1:
-            self.pxl8.style[y][x] = RoundPixel(self.pxl8.pixel_width)
-        else:
-            self.pxl8.style[y][x] = SquarePixel(self.pxl8.pixel_width)
-        self.pxl8.dirty.add((x, y))
-        pass
+        x = x // self.display.pixel_width
+        y = y // self.display.pixel_width
+        print('Mouse:', event.button, '@', (x, y))
+        style = self.display.styles[0]
+        if self.display.style[y][x] == style:
+            style = self.display.styles[1]
+        self.display.set_color((x, y), style, layer=2)
+
+    def handle_event(self, event: pygame.event.Event):
+        handler = self.event_map.get(event.type, None)
+        if handler is not None:
+            handler(event)
 
     def run(self):
-        pygame.event.set_allowed([pygame.USEREVENT, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.QUIT])
-        self.update_time()
-        pygame.time.set_timer(pygame.USEREVENT, 1000)
+        pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.QUIT])
+        self.update_time(force=True)
+        pygame.time.set_timer(self.timer_event, 1000)
         event_map = {
-            pygame.USEREVENT: self.update_time,
+            self.timer_event: self.update_time,
             pygame.KEYDOWN: self.key_press,
             pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
@@ -311,7 +458,9 @@ class ClockApp:
 
 
 def main():
-    ClockApp(Pixelate()).run()
+    pxl8 = Pixelate()
+    pxl8.switch_app(ClockApp(pxl8))
+    pxl8.eventloop()
     exit()
 
 
