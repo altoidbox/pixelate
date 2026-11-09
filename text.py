@@ -146,9 +146,9 @@ def get_fonts() -> list[tuple[str, int]]:
         'Tiny5-Regular.ttf': [8, 16],  # *8*: ~[3x5], *16*: [6x10]
         'Micro5-Regular.ttf': [10, 16, 21],  # *10*: ~[3x5], 14: [4x6], *16*: [4x8], *21*: [6x10]
         'Jersey10-Regular.ttf': [18],  # 9: bad kerning, *18*: ~[7x9]
-        'Bytesized-Regular.ttf': [8, 12, 16],  # *8*: [3x4], *12*: [5x7], *16*: [6x8]
+        'Bytesized-Regular.ttf': [8, 16],  # *8*: [3x4], 12: [5x7], *16*: [6x8]
         'JacquardaBastarda9-Regular.ttf': [12],  # *12*: [5x10], 19: [bigish] 23: [big]
-        'Silkscreen-Regular.ttf': [8, 15, 16],  # *8*: [4x5], 15: [7x10], 16: [8x10] - wide kerning
+        'Silkscreen-Regular.ttf': [8, 16],  # *8*: [4x5], 15: [7x10], *16*: [8x10] - wide kerning
         'VT323-Regular.ttf': [20],  # 20: [6x11]
     }
     fonts = []
