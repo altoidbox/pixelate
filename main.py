@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 
-from pixelate import Pixelate
+from pixelate import Pixelate, ShimmerEffect
 from clock import ClockApp
 
 
 def main():
     pxl8 = Pixelate()
     pxl8.start_app(ClockApp(pxl8), activate=True)
+    pxl8.enable_effect(ShimmerEffect(pxl8))
     pxl8.eventloop()
     exit()
 

@@ -1,29 +1,12 @@
 #!/usr/bin/env python3
 import pygame
-import time
-import os
 import threading
 from pygame import Surface
-import text
+import random
 
 
 CLEAR = pygame.Color(0, 0, 0, 0)
 WHITE = pygame.Color(255, 255, 255, 255)
-
-
-class Alignment:
-    # X align
-    LEFT = -2
-    MIDLEFT = -1
-    MIDRIGHT = 1
-    RIGHT = 2
-    # Y align
-    TOP = -2
-    MIDTOP = -1
-    MIDBOTTOM = 1
-    BOTTOM = 2
-    # X or Y align
-    CENTER = 0
 
 
 class SquarePixel:
@@ -60,7 +43,7 @@ def iter_rect(rect: pygame.Rect):
     return ((x, y) for x in range(rect.left, rect.right) for y in range(rect.top, rect.bottom))
 
 
-def join_horizontal(surfaces, yalignment=Alignment.TOP, xpadding=0):
+def join_horizontal(surfaces, yalign=0, xpadding=0):
     if len(surfaces) == 1:
         return surfaces[0]
     width = sum(surf.get_width() for surf in surfaces) + (xpadding * (len(surfaces) - 1))
@@ -70,13 +53,13 @@ def join_horizontal(surfaces, yalignment=Alignment.TOP, xpadding=0):
     full_rect = full_surface.get_rect()
     x = 0
     for surf in surfaces:
-        loc = align_surface(surf, rel_to=full_rect, yalign=yalignment, offset=(x, 0))
+        loc = align_surface(surf, rel_to=full_rect, yalign=yalign, offset=(x, 0))
         full_surface.blit(surf, loc.topleft)
         x += surf.get_width() + xpadding
     return full_surface
 
 
-def join_vertical(surfaces, xalignment=Alignment.LEFT, ypadding=0):
+def join_vertical(surfaces, xalign=0, ypadding=0):
     if len(surfaces) == 1:
         return surfaces[0]
     width = max(surf.get_width() for surf in surfaces)
@@ -86,18 +69,14 @@ def join_vertical(surfaces, xalignment=Alignment.LEFT, ypadding=0):
     full_rect = full_surface.get_rect()
     y = 0
     for surf in surfaces:
-        loc = align_surface(surf, rel_to=full_rect, xalign=xalignment, offset=(0, y))
+        loc = align_surface(surf, rel_to=full_rect, xalign=xalign, offset=(0, y))
         full_surface.blit(surf, loc.topleft)
         y += surf.get_height() + ypadding
     return full_surface
 
 
-def prepare_surface(lines, xalignment=Alignment.LEFT):
-    surf_lines = [join_horizontal(line) for line in lines]
-    return join_vertical(surf_lines, xalignment)
-
-
-def align_surface(rect: pygame.Rect|pygame.Surface, rel_to: pygame.Rect|pygame.Surface, xalign=None, yalign=None, padding=0, offset=None):
+def align_surface(rect: pygame.Rect|pygame.Surface, rel_to: pygame.Rect|pygame.Surface, 
+                  xalign: float|int = 0, yalign: float|int = 0, padding=0, offset=None):
     if isinstance(rel_to, pygame.Surface):
         rel_to = rel_to.get_rect()
     if isinstance(rect, pygame.Surface):
@@ -106,32 +85,10 @@ def align_surface(rect: pygame.Rect|pygame.Surface, rel_to: pygame.Rect|pygame.S
         rect = rect.copy()
     if padding:
         rel_to = rel_to.inflate(-2*padding, -2*padding)
-    match xalign:
-        case Alignment.LEFT:
-            rect.left = rel_to.left
-        case Alignment.MIDLEFT:
-            within = rel_to.width - rect.width
-            rect.left = rel_to.left + within // 4
-        case Alignment.CENTER:
-            rect.centerx = rel_to.centerx
-        case Alignment.MIDRIGHT:
-            within = rel_to.width - rect.width
-            rect.right = rel_to.right - within // 4
-        case Alignment.RIGHT:
-            rect.right = rel_to.right
-    match yalign:
-        case Alignment.TOP:
-            rect.top = rel_to.top
-        case Alignment.MIDTOP:
-            within = rel_to.height - rect.height
-            rect.top = rel_to.top + within // 4
-        case Alignment.CENTER:
-            rect.centery = rel_to.centery
-        case Alignment.MIDBOTTOM:
-            within = rel_to.height - rect.height
-            rect.bottom = rel_to.bottom - within // 4
-        case Alignment.BOTTOM:
-            rect.bottom = rel_to.bottom
+    within = rel_to.width - rect.width
+    rect.left = rel_to.left + within * xalign / 100
+    within = rel_to.height - rect.height
+    rect.top = rel_to.top + within * yalign / 100
     if offset:
         rect.move_ip(offset)
     return rect
@@ -159,6 +116,7 @@ class Pixelate:
         self.preferred_height = preferred_height
 
         self.clock = pygame.time.Clock()
+        self.effect = None
         self.apps = set()
         self.displays = {}
         self.next_display_id = 0
@@ -190,6 +148,11 @@ class Pixelate:
                 return True
         return False
 
+    def enable_effect(self, effect):
+        self.effect = effect
+        effect.start()
+        effect.activate()
+
     def start_app(self, app: 'PixelateApp', activate=False):
         self.apps.add(app)
         app.start()
@@ -199,8 +162,8 @@ class Pixelate:
     def switch_app(self, app: 'PixelateApp'):
         if app is self.active_app:
             return
-        pygame.event.set_blocked(None)
-        pygame.event.set_allowed(self.REQUIRED_EVENTS)
+        #pygame.event.set_blocked(None)
+        #pygame.event.set_allowed(self.REQUIRED_EVENTS)
         if self.active_app is not None:
             self.active_app.deactivate()
         self.active_app = app
@@ -216,6 +179,8 @@ class Pixelate:
                     self.running = False
                 else:
                     self.active_app.handle_event(event)
+                    if self.effect:
+                        self.effect.handle_event(event)
                 event = pygame.event.poll()
             self.active_display.paint(self.screen)
             pygame.display.flip()
@@ -261,10 +226,12 @@ class PixelateDisplay:
             return
         if not self.rect.collidepoint(coord):
             return
-        if self.layers[layer][y][x] == color:
-            return
+        old_color = self.layers[layer][y][x]
+        if old_color == color:
+            return old_color
         self.layers[layer][y][x] = color
         self.dirty.add(coord)
+        return old_color
 
     @with_lock
     def draw_surface(self, coord, surface: Surface, layer=1, ignore_clear=True):
@@ -356,3 +323,83 @@ class PixelateApp:
         The app should de-register any callbacks so it can cleanup nicely
         """
         pass
+
+
+class ShimmerEffect(PixelateApp):
+    class Pixel:
+        def __init__(self, display, pixel, loc):
+            self.display = display
+            self.pixel = pixel
+            self.state = 0
+            self.loc = loc
+
+        def render(self, color, background):
+            surf: pygame.Surface = self.pixel.render(color, background)
+            if self.display.foreground[self.loc[1]][self.loc[0]].a == 0:
+                return surf
+            if self.state == 1:
+                flag = pygame.BLEND_RGB_ADD
+            else:
+                flag = pygame.BLEND_RGB_SUB
+            surf.fill((50, 50, 50), special_flags=flag)
+            return surf
+        
+    def __init__(self, pxl8: 'Pixelate'):
+        self.pxl8 = pxl8
+        self.timer_event = pygame.event.custom_type()
+        self.display = None
+        self.shimmering = []
+
+    def activate(self):
+        print('ShimmerEffect', 'activate')
+        self.display = self.pxl8.active_display
+        #pygame.time.set_timer(self.timer_event, random.randrange(2000, 20000))
+        pygame.time.set_timer(self.timer_event, 2000)
+
+    def deactivate(self):
+        print('ShimmerEffect', 'deactivate')
+        pygame.time.set_timer(self.timer_event, 0)
+        for pixel in self.shimmering:
+            self.restore_pixel(pixel)
+
+    def add_pixel(self, x, y):
+        if x >= self.display.width or y < 0:
+            return
+        pixel = ShimmerEffect.Pixel(self.display, self.display.style[y][x], (x, y))
+        self.display.set_color(pixel.loc, pixel, layer=2)
+        self.shimmering.append(pixel)
+
+    def restore_pixel(self, pixel):
+        self.display.set_color(pixel.loc, pixel.pixel, layer=2)
+
+    def progress_pixel(self, pixel):
+        x, y = pixel.loc
+        if pixel.state == 0:
+            self.add_pixel(x + 1, y)
+            if x == 0:
+                self.add_pixel(x, y - 1)
+        pixel.state += 1
+        if pixel.state >= 3:
+            self.restore_pixel(pixel)
+        else:
+            self.shimmering.append(pixel)
+
+    def handle_event(self, event):
+        if event.type != self.timer_event:
+            return
+        if not self.shimmering:
+            # start shimmering!
+            pygame.time.set_timer(self.timer_event, 40)
+            self.add_pixel(0, self.display.height - 1)
+            return
+        # Next iteration of shimmering
+        # every pixel moves to the right
+        # a new pixel is generated at x=0, y=y+1, if a pixel exists at x=0
+        # pixels that go out of bounds are removed
+        shimmering = self.shimmering
+        self.shimmering = []
+        for pixel in shimmering:
+            self.progress_pixel(pixel)
+        if len(self.shimmering) == 0:
+            pygame.time.set_timer(self.timer_event, random.randrange(2000, 20000))
+
