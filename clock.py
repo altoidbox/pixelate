@@ -1,6 +1,7 @@
 from pixelate import *
 import text
 import time
+from pathlib import Path
 
 
 BASE_CONFIG = {
@@ -41,6 +42,8 @@ class ClockApp(PixelateApp):
             pygame.KEYDOWN: self.key_press,
             pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
+        self.bg_paths = list(Path('backgrounds').iterdir())
+        self.bg_index = 0
         self.config_index = 1
         # Configuration:
         self._font = None
@@ -78,8 +81,10 @@ class ClockApp(PixelateApp):
             value, xalign, yalign = value
         if isinstance(value, pygame.Surface):
             surf = value
-        elif isinstance(value, str):
+        elif isinstance(value, (str, Path)):
             surf = pygame.image.load(value)
+        else:
+            return
 
         self._background = surf, xalign, yalign
         dest = align_surface(surf, self.display.rect, xalign=xalign, yalign=yalign)
@@ -189,6 +194,9 @@ class ClockApp(PixelateApp):
             case pygame.K_p:
                 self.config_index = (self.config_index + 1) % len(PRESETS)
                 self.load_config(**PRESETS[self.config_index])
+            case pygame.K_b:
+                self.background = self.bg_paths[self.bg_index]
+                self.bg_index = (self.bg_index + 1) % len(self.bg_paths)
             case _:
                 return
         #print(self.font.name, 's:', self.font.point_size, 'h:', self.font.get_height(), 'l:', self.font.get_linesize(), 'a:', self.font.get_ascent(), 'd:', self.font.get_descent())
