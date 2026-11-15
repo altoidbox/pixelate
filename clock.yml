@@ -1,0 +1,29 @@
+- font:
+    path: PressStart2P-Regular.ttf
+    size: 8
+  background:
+    path: mountain-cabin.png
+    xalign: 0
+    yalign: 10
+  text_color: [255, 255, 255, 255]
+  shadow_color: [80, 80, 80, 180]
+  xalign: 100
+  yalign: 100
+  show_dayofweek: False
+  show_date: True
+  twelve_hour: True
+
+- font:
+    path: Jersey10-Regular.ttf
+    size: 18
+  background:
+    path: mountain-cabin.png
+    xalign: 0
+    yalign: 100
+  text_color: [255, 255, 255, 255]
+  shadow_color: [80, 80, 80, 180]
+  xalign: 50
+  yalign: 25
+  show_dayofweek: False
+  show_date: False
+  twelve_hour: False

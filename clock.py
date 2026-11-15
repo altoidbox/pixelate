@@ -1,32 +1,148 @@
 from pixelate import *
 import text
 import time
+import yaml
 from pathlib import Path
+from dataclasses import dataclass
+from config import *
 
 
-BASE_CONFIG = {
-    'font': ('PressStart2P-Regular.ttf', 8),
-    'background': ("mountain-cabin.png", 0, 10),
-    'text_color': WHITE,
-    'shadow_color': pygame.Color(80, 80, 80, 180),
-    'xalign': 100,
-    'yalign': 100,
-    'show_dayofweek': False,
-    'show_date': True,
-    'clock_12hour': True,
-}
+@dataclass
+class ClockConfig(LoadableConfig):
+    font: FontFileConfig
+    background: ImageFileConfig | None = None
+    text_color: pygame.Color = field(default_factory=lambda: WHITE)
+    shadow_color: pygame.Color | None = None
+    xalign: int = 0
+    yalign: int = 0
+    show_dayofweek: bool = False
+    show_date: bool = False
+    twelve_hour: bool = False
 
-PRESETS = [BASE_CONFIG]
-PRESETS.append(BASE_CONFIG.copy())
-PRESETS[-1].update(
-    font=('Jersey10-Regular.ttf', 18),
-    background=("mountain-cabin.png", 0, 100),
-    show_date=False, clock_12hour=False,
-    xalign=50, yalign=25
-)
+    @classmethod
+    def load(cls, config):
+        if 'font' in config:
+            config['font'] = FontFileConfig.load(config['font'])
+        if 'background' in config:
+            config['background'] = ImageFileConfig.load(config['background'])
+        if 'text_color' in config:
+            config['text_color'] = pygame.Color(config['text_color'])
+        if 'shadow_color' in config:
+            config['shadow_color'] = pygame.Color(config['shadow_color'])
+        return cls(**config)
 
 
-class ClockApp(PixelateApp):
+def load_configs(path):
+    with open(path, 'r') as f:
+        return [ClockConfig.load(config) for config in yaml.safe_load(f)]
+
+
+PRESETS = load_configs('clock.yml')
+
+
+class ClockConfigEditorMixin:
+    CONFIG_MODE_NONE = 0
+    CONFIG_MODE_FONT = 1
+    CONFIG_MODE_BACKGROUND = 2
+
+    def __init__(self, *args, **kwargs):
+        self.__config_mode = self.CONFIG_MODE_NONE
+
+    def key_down_font(self, event):
+        match event.key:
+            case pygame.K_j:
+                self.font_index = (self.font_index + 1) % len(self.fonts)
+                path, size = self.fonts[self.font_index]
+                self.config.font = FontFileConfig(path=path, size=size)
+            case pygame.K_k:
+                self.font_index = (self.font_index - 1) % len(self.fonts)
+                path, size = self.fonts[self.font_index]
+                self.config.font = FontFileConfig(path=path, size=size)
+            case pygame.K_u:
+                self.config.font = FontFileConfig(path=self.config.font.name, size=self.config.font.size + 1)
+            case pygame.K_i:
+                self.config.font = FontFileConfig(path=self.config.font.name, size=max(self.config.font.size - 1, 0))
+            case pygame.K_UP:
+                self.config.yalign = max(self.config.yalign - 25, 0)
+            case pygame.K_DOWN:
+                self.config.yalign = min(self.config.yalign + 25, 100)
+            case pygame.K_LEFT:
+                self.config.xalign = max(self.config.xalign - 25, 0)
+            case pygame.K_RIGHT:
+                self.config.xalign = min(self.config.xalign + 25, 100)
+            case _:
+                return False
+        #print(self.config.font.name, 's:', self.config.font.size, 'h:', self.font.get_height(), 'l:', self.font.get_linesize(), 'a:', self.font.get_ascent(), 'd:', self.font.get_descent())
+        return True
+
+    def key_down_background(self, event):
+        match event.key:
+            case pygame.K_j:
+                self.bg_index = (self.bg_index + 1) % len(self.bg_paths)
+                self.config.background = ImageFileConfig(self.bg_paths[self.bg_index])
+            case pygame.K_k:
+                self.bg_index = (self.bg_index - 1) % len(self.bg_paths)
+                self.config.background = ImageFileConfig(self.bg_paths[self.bg_index])
+            case pygame.K_UP:
+                if self.config.background is None:
+                    return False
+                self.config.background.yalign = max(self.config.background.yalign - 10, 0)
+            case pygame.K_DOWN:
+                if self.config.background is None:
+                    return False
+                self.config.background.yalign = min(self.config.background.yalign + 10, 100)
+            case pygame.K_LEFT:
+                if self.config.background is None:
+                    return False
+                self.config.background.xalign = max(self.config.background.xalign - 10, 0)
+            case pygame.K_RIGHT:
+                if self.config.background is None:
+                    return False
+                self.config.background.xalign = min(self.config.background.xalign + 10, 100)
+            case _:
+                return False
+        return True
+
+    def key_down(self, event):
+        update = True
+        match event.key, self.__config_mode:
+            case pygame.K_f, _:
+                self.__config_mode = self.CONFIG_MODE_FONT
+                return
+            case pygame.K_b, _:
+                self.__config_mode = self.CONFIG_MODE_BACKGROUND
+                return
+            case pygame.K_c, _:
+                self.config.twelve_hour = not self.config.twelve_hour
+            case pygame.K_d, _:
+                self.config.show_date = not self.config.show_date
+            case pygame.K_w, _:
+                self.config.show_dayofweek = not self.config.show_dayofweek
+            case pygame.K_p, _:
+                self.config_index = (self.config_index + 1) % len(PRESETS)
+                self.config = PRESETS[self.config_index]
+            case _, self.CONFIG_MODE_NONE:
+                return
+            case _, self.CONFIG_MODE_FONT:
+                update = self.key_down_font(event)
+            case _, self.CONFIG_MODE_BACKGROUND:
+                update = self.key_down_background(event)
+        if update:
+            self.update_time(force=True)
+
+    def mouse_down(self, event: pygame.event.Event):
+        # translate mouse position to pixel grid position
+        x, y = event.pos
+        x = x // self.display.pixel_width
+        y = y // self.display.pixel_width
+        print('Mouse:', event.button, '@', (x, y))
+        style = self.display.styles[0]
+        if self.display.style[y][x] == style:
+            style = self.display.styles[1]
+        self.display.set_color((x, y), style, layer=2)
+
+
+class ClockApp(ClockConfigEditorMixin, PixelateApp):
     def __init__(self, pxl8: Pixelate):
         super().__init__(pxl8)
         self.pxl8 = pxl8
@@ -39,61 +155,18 @@ class ClockApp(PixelateApp):
         self.timer_event = pygame.event.custom_type()
         self.event_map = {
             self.timer_event: self.update_time,
-            pygame.KEYDOWN: self.key_press,
+            pygame.KEYDOWN: self.key_down,
             pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
         self.bg_paths = list(Path('backgrounds').iterdir())
         self.bg_index = 0
         self.config_index = 1
         # Configuration:
-        self._font = None
-        self._background = None
-        self.text_color = None
-        self.shadow_color = None
-        self.xalign = 0
-        self.yalign = 0
-        self.show_dayofweek = False
-        self.show_date = False
-        self.clock_12hour = False
-        self.load_config(**PRESETS[self.config_index])
+        self.config = PRESETS[self.config_index]
 
     @property
     def font(self):
-        return self._font
-
-    @font.setter
-    def font(self, value):
-        if isinstance(value, (list, tuple)):
-            self._font = text.get_font(*value)
-        elif isinstance(value, str):
-            self._font = text.get_font(value)
-        else:
-            self._font = value
-
-    @property
-    def background(self):
-        return self._background
-
-    @background.setter
-    def background(self, value):
-        xalign, yalign = (0, 0)
-        if isinstance(value, (list, tuple)):
-            value, xalign, yalign = value
-        if isinstance(value, pygame.Surface):
-            surf = value
-        elif isinstance(value, (str, Path)):
-            surf = pygame.image.load(value)
-        else:
-            return
-
-        self._background = surf, xalign, yalign
-        dest = align_surface(surf, self.display.rect, xalign=xalign, yalign=yalign)
-        self.display.draw_surface(dest.topleft, surf, layer=0)
-
-    def load_config(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-        self.update_time(force=True)
+        return self.config.font.value
 
     def start(self):
         pass
@@ -108,24 +181,27 @@ class ClockApp(PixelateApp):
         pygame.time.set_timer(self.timer_event, 0)
 
     def render_text(self, msg) -> pygame.Surface:
-        surf = text.text_shadow(self.font, msg, self.text_color, self.shadow_color)
+        if self.config.shaow_color is None:
+            surf = self.font.render(msg, self.config.text_color)
+        else:
+            surf = text.text_shadow(self.font, msg, self.config.text_color, self.config.shadow_color)
         r = surf.get_rect()
         r.inflate_ip((-1, 0))
         return surf.subsurface(r)
 
     def draw_time(self, curtime):
-        if self.show_date:
+        if self.config.show_date:
             datetext = time.strftime("%e %b", curtime).strip()
-            if self.show_dayofweek:
+            if self.config.show_dayofweek:
                 datetext = time.strftime("%a, ", curtime) + datetext
             dateline = self.render_text(datetext)
             dateline = dateline.subsurface(dateline.get_bounding_rect())
-        elif self.show_dayofweek:
+        elif self.config.show_dayofweek:
             dateline = self.render_text(time.strftime("%A", curtime))
             dateline = dateline.subsurface(dateline.get_bounding_rect())
         else:
             dateline = None
-        if self.clock_12hour:
+        if self.config.twelve_hour:
             hour = self.render_text(time.strftime("%I", curtime).lstrip('0'))
         else:
             hour = self.render_text(time.strftime("%H", curtime))
@@ -133,7 +209,7 @@ class ClockApp(PixelateApp):
         blank = pygame.Surface((colon.get_width(), hour.get_height()), pygame.SRCALPHA)
         blank.fill(CLEAR)
         minutes = self.render_text(time.strftime("%M", curtime))
-        if self.clock_12hour:
+        if self.config.twelve_hour:
             ampm = self.render_text(time.strftime("%p", curtime).lower())
             time_suffix = [ampm]
         else:
@@ -148,13 +224,17 @@ class ClockApp(PixelateApp):
         for timeline in [with_colon, without_colon]:
             timeline = timeline.subsurface(timeline_bounds)
             if dateline is not None:
-                surfaces.append(join_vertical([dateline, timeline], xalign=self.xalign, ypadding=1))
+                surfaces.append(join_vertical([dateline, timeline], xalign=self.config.xalign, ypadding=1))
             else:
                 surfaces.append(timeline)
         return surfaces
 
     def update_time(self, event=None, force=False):
         curtime = time.localtime()
+        if force and self.config.background is not None:
+            surf, xalign, yalign = self.config.background.value
+            dest = align_surface(surf, self.display.rect, xalign=xalign, yalign=yalign)
+            self.display.draw_surface(dest.topleft, surf, layer=0)
         if force or self.surface_time != curtime[1:5]:
             self.display.fill(self.display.rect, CLEAR)
             self.surfaces = self.draw_time(curtime)
@@ -162,56 +242,8 @@ class ClockApp(PixelateApp):
         if event is not None and event.type == self.timer_event:
             self.surface_index = (self.surface_index + 1) % len(self.surfaces)
         surface = self.surfaces[self.surface_index]
-        rect = align_surface(surface, rel_to=self.display.rect, padding=1, xalign=self.xalign, yalign=self.yalign)
+        rect = align_surface(surface, rel_to=self.display.rect, padding=1, xalign=self.config.xalign, yalign=self.config.yalign)
         self.display.draw_surface(rect.topleft, surface, ignore_clear=False)
-
-    def key_press(self, event):
-        match event.key:
-            case pygame.K_j:
-                self.font_index = (self.font_index + 1) % len(self.fonts)
-                self.font = text.get_font(*self.fonts[self.font_index])
-            case pygame.K_k:
-                self.font_index = (self.font_index - 1) % len(self.fonts)
-                self.font = text.get_font(*self.fonts[self.font_index])
-            case pygame.K_u:
-                self.font = self.font.with_size(self.font.point_size + 1)
-            case pygame.K_i:
-                self.font = self.font.with_size(self.font.point_size - 1)
-            case pygame.K_UP:
-                self.yalign = max(self.yalign - 25, 0)
-            case pygame.K_DOWN:
-                self.yalign = min(self.yalign + 25, 100)
-            case pygame.K_LEFT:
-                self.xalign = max(self.xalign - 25, 0)
-            case pygame.K_RIGHT:
-                self.xalign = min(self.xalign + 25, 100)
-            case pygame.K_c:
-                self.clock_12hour = not self.clock_12hour
-            case pygame.K_d:
-                self.show_date = not self.show_date
-            case pygame.K_w:
-                self.show_dayofweek = not self.show_dayofweek
-            case pygame.K_p:
-                self.config_index = (self.config_index + 1) % len(PRESETS)
-                self.load_config(**PRESETS[self.config_index])
-            case pygame.K_b:
-                self.background = self.bg_paths[self.bg_index]
-                self.bg_index = (self.bg_index + 1) % len(self.bg_paths)
-            case _:
-                return
-        #print(self.font.name, 's:', self.font.point_size, 'h:', self.font.get_height(), 'l:', self.font.get_linesize(), 'a:', self.font.get_ascent(), 'd:', self.font.get_descent())
-        self.update_time(force=True)
-
-    def mouse_down(self, event: pygame.event.Event):
-        # translate mouse position to pixel grid position
-        x, y = event.pos
-        x = x // self.display.pixel_width
-        y = y // self.display.pixel_width
-        print('Mouse:', event.button, '@', (x, y))
-        style = self.display.styles[0]
-        if self.display.style[y][x] == style:
-            style = self.display.styles[1]
-        self.display.set_color((x, y), style, layer=2)
 
     def handle_event(self, event: pygame.event.Event):
         handler = self.event_map.get(event.type, None)
@@ -224,7 +256,7 @@ class ClockApp(PixelateApp):
         pygame.time.set_timer(self.timer_event, 1000)
         event_map = {
             self.timer_event: self.update_time,
-            pygame.KEYDOWN: self.key_press,
+            pygame.KEYDOWN: self.key_down,
             pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
         for event in self.pxl8.eventloop():

@@ -1,4 +1,5 @@
 import pygame
+import pygame.freetype
 from pathlib import Path
 
 
@@ -10,14 +11,14 @@ def draw_shape(pxarray: pygame.PixelArray, shape, coord, color):
                 pxarray[x + xoff, y + yoff] = color
 
 
-class Font(pygame.font.Font):
+class PgFont(pygame.font.Font):
     def __init__(self, name=None, size=12):
         super().__init__(name, size)
         self.name = name
-        self.point_size = size
 
-    def with_size(self, size):
-        return self.__class__(self.name, size)
+
+#Font = PgFont
+Font = pygame.freetype.Font
 
 
 class Font3x5(Font):
@@ -135,25 +136,25 @@ class Font6x10(Font):
 
 
 LOADED_FONTS = {}
+FONT_SIZE_MAP = {
+    'PressStart2P-Regular.ttf': [8],  # *8*: [7x7]
+    'PixelifySans-Regular.ttf': [11],  # *11*: [5x7], 19: [9x12]
+    'Tiny5-Regular.ttf': [8, 16],  # *8*: ~[3x5], *16*: [6x10]
+    'Micro5-Regular.ttf': [10, 16, 21],  # *10*: ~[3x5], 14: [4x6], *16*: [4x8], *21*: [6x10]
+    'Jersey10-Regular.ttf': [18],  # 9: bad kerning, *18*: ~[7x9]
+    'Bytesized-Regular.ttf': [8, 16],  # *8*: [3x4], 12: [5x7], *16*: [6x8]
+    'JacquardaBastarda9-Regular.ttf': [12],  # *12*: [5x10], 19: [bigish] 23: [big]
+    'Silkscreen-Regular.ttf': [8, 16],  # *8*: [4x5], 15: [7x10], *16*: [8x10] - wide kerning
+    'VT323-Regular.ttf': [20],  # 20: [6x11]
+}
 
 
 def get_fonts() -> list[tuple[str, int]]:
     #fonts += [Font3x5()]
     #fonts += [Font6x10()]
-    size_maps = {
-        'PressStart2P-Regular.ttf': [8],  # *8*: [7x7]
-        'PixelifySans-Regular.ttf': [11],  # *11*: [5x7], 19: [9x12]
-        'Tiny5-Regular.ttf': [8, 16],  # *8*: ~[3x5], *16*: [6x10]
-        'Micro5-Regular.ttf': [10, 16, 21],  # *10*: ~[3x5], 14: [4x6], *16*: [4x8], *21*: [6x10]
-        'Jersey10-Regular.ttf': [18],  # 9: bad kerning, *18*: ~[7x9]
-        'Bytesized-Regular.ttf': [8, 16],  # *8*: [3x4], 12: [5x7], *16*: [6x8]
-        'JacquardaBastarda9-Regular.ttf': [12],  # *12*: [5x10], 19: [bigish] 23: [big]
-        'Silkscreen-Regular.ttf': [8, 16],  # *8*: [4x5], 15: [7x10], *16*: [8x10] - wide kerning
-        'VT323-Regular.ttf': [20],  # 20: [6x11]
-    }
     fonts = []
     for font_path in sorted(Path('./fonts').glob('*.ttf')):
-        sizes = size_maps.get(font_path.name, [12])
+        sizes = FONT_SIZE_MAP.get(font_path.name, [12])
         for size in sizes:
             fonts.append((font_path.name, size))
             #font = Font(str(font_path), size)
@@ -162,34 +163,49 @@ def get_fonts() -> list[tuple[str, int]]:
     return fonts
 
 
-def get_font(name, size):
+def get_font(name, size=None):
+    if size is None:
+        size = FONT_SIZE_MAP.get(name, [12])[0]
     if (name, size) in LOADED_FONTS:
         return LOADED_FONTS[(name, size)]
     path = Path(name)
     if not path.exists():
         path = Path('./fonts') / name
     LOADED_FONTS[(name, size)] = font = Font(str(path), size)
+    if isinstance(font, pygame.freetype.Font):
+        font.antialiased = False
+        font.pad = True
     return font
 
 
-def text_shadow(font: pygame.font.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)) -> pygame.Surface:
-    foreground = font.render(text, 0, color)
-    shadow = font.render(text, 0, shadow_color)
-    shadow.set_alpha(shadow_color.a)
-
+def text_shadow(font: pygame.freetype.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)) -> pygame.Surface:
+    if isinstance(font, pygame.font.Font):
+        foreground = font.render(text, 0, color)
+        shadow = font.render(text, 0, shadow_color)
+        fg_rect = foreground.get_rect()
+        shadow.set_alpha(shadow_color.a)
+    else:
+        foreground, fg_rect = font.render(text, color)
+        shadow, _ = font.render(None, shadow_color)
     dx, dy = offset
-    width = foreground.get_width() + abs(dx)
-    height = foreground.get_height() + abs(dy)
+    width = fg_rect.x + fg_rect.width + abs(dx)
+    height = fg_rect.y + fg_rect.height + abs(dy)
     surface = pygame.Surface((width, height), pygame.SRCALPHA)
-    surface.blit(shadow, (max(0, dx), max(0, dy)))
-    surface.blit(foreground, (max(0, -dx), max(0, -dy)))
+    surface.blit(shadow, (fg_rect.x + max(0, dx), fg_rect.y + max(0, dy)))
+    surface.blit(foreground, (fg_rect.x + max(0, -dx), fg_rect.y + max(0, -dy)))
+    #print(f'text:"{text}" -> {fg_rect} -> {surface.get_rect()} ({surface.get_bounding_rect()})')
     return surface
 
 
-def text_shadows(font: pygame.font.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offsets=[(1, 1)]):
-    foreground = font.render(text, 0, color)
-    shadow = font.render(text, 0, shadow_color)
-    #shadow.set_alpha(shadow_color.a)
+def text_shadows(font: pygame.freetype.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offsets=[(1, 1)]):
+    if isinstance(font, pygame.font.Font):
+        foreground = font.render(text, 0, color)
+        shadow = font.render(text, 0, shadow_color)
+        fg_rect = foreground.get_rect()
+        shadow.set_alpha(shadow_color.a)
+    else:
+        foreground, fg_rect = font.render(text, color)
+        shadow, _ = font.render(None, shadow_color)
 
     left = right = 0
     top = bottom = 0
@@ -203,8 +219,8 @@ def text_shadows(font: pygame.font.Font, text: str, color: pygame.Color, shadow_
         elif dy > bottom:
             bottom = dy
     
-    width = foreground.get_width() + abs(left) + right
-    height = foreground.get_height() + abs(top) + bottom
+    width = fg_rect.width + abs(left) + right
+    height = fg_rect.height + abs(top) + bottom
     bg = pygame.Surface((width, height), shadow.get_flags(), shadow.get_bitsize(), shadow.get_masks())
     bg.set_palette(shadow.get_palette())
     bg.set_colorkey(shadow.get_colorkey())
