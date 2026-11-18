@@ -181,7 +181,7 @@ class ClockApp(ClockConfigEditorMixin, PixelateApp):
         pygame.time.set_timer(self.timer_event, 0)
 
     def render_text(self, msg) -> pygame.Surface:
-        if self.config.shaow_color is None:
+        if self.config.shadow_color is None:
             surf = self.font.render(msg, self.config.text_color)
         else:
             surf = text.text_shadow(self.font, msg, self.config.text_color, self.config.shadow_color)
