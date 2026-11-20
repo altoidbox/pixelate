@@ -170,7 +170,7 @@ def get_font(name, size=None):
         return LOADED_FONTS[(name, size)]
     path = Path(name)
     if not path.exists():
-        path = Path('./fonts') / name
+        path = Path('./resources/fonts') / name
     LOADED_FONTS[(name, size)] = font = Font(str(path), size)
     if isinstance(font, pygame.freetype.Font):
         font.antialiased = False

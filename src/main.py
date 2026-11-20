@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-from pixelate import Pixelate, ShimmerEffect
-from clock import ClockApp
+from pixelate.pixelate import Pixelate, ShimmerEffect
+from apps.clock.clock import ClockApp
 
 
 def main():

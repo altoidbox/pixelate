@@ -1,14 +1,17 @@
-from pixelate import *
-import text
+from pixelate.pixelate import *
+import pixelate.text as text
 import time
 import yaml
 from pathlib import Path
 from dataclasses import dataclass
-from config import *
+from pixelate.config import *
+
+
+CUR_DIR = Path(__file__).parent
 
 
 @dataclass
-class ClockConfig(LoadableConfig):
+class AppConfig(LoadableConfig):
     font: FontFileConfig
     background: ImageFileConfig | None = None
     text_color: pygame.Color = field(default_factory=lambda: WHITE)
@@ -34,19 +37,24 @@ class ClockConfig(LoadableConfig):
 
 def load_configs(path):
     with open(path, 'r') as f:
-        return [ClockConfig.load(config) for config in yaml.safe_load(f)]
+        return [AppConfig.load(config) for config in yaml.safe_load(f)]
 
 
-PRESETS = load_configs('clock.yml')
+PRESETS = load_configs(CUR_DIR / 'clock.yml')
 
 
-class ClockConfigEditorMixin:
+class AppConfigEditorMixin:
     CONFIG_MODE_NONE = 0
     CONFIG_MODE_FONT = 1
     CONFIG_MODE_BACKGROUND = 2
 
     def __init__(self, *args, **kwargs):
         self.__config_mode = self.CONFIG_MODE_NONE
+        self.fonts = text.get_fonts()
+        self.font_index = 0
+        self.bg_paths = list(Path('resources/backgrounds').iterdir())
+        self.bg_index = 0
+        self.config_index = 1
 
     def key_down_font(self, event):
         match event.key:
@@ -142,13 +150,11 @@ class ClockConfigEditorMixin:
         self.display.set_color((x, y), style, layer=2)
 
 
-class ClockApp(ClockConfigEditorMixin, PixelateApp):
+class ClockApp(AppConfigEditorMixin, PixelateApp):
     def __init__(self, pxl8: Pixelate):
         super().__init__(pxl8)
         self.pxl8 = pxl8
         self.display = pxl8.create_display(self)
-        self.fonts = text.get_fonts()
-        self.font_index = 0
         self.surfaces = [None, None]
         self.surface_time = None
         self.surface_index = 0
@@ -158,11 +164,8 @@ class ClockApp(ClockConfigEditorMixin, PixelateApp):
             pygame.KEYDOWN: self.key_down,
             pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
-        self.bg_paths = list(Path('backgrounds').iterdir())
-        self.bg_index = 0
-        self.config_index = 1
         # Configuration:
-        self.config = PRESETS[self.config_index]
+        self.config = PRESETS[0]
 
     @property
     def font(self):
@@ -249,17 +252,3 @@ class ClockApp(ClockConfigEditorMixin, PixelateApp):
         handler = self.event_map.get(event.type, None)
         if handler is not None:
             handler(event)
-
-    def run(self):
-        pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN, pygame.QUIT])
-        self.update_time(force=True)
-        pygame.time.set_timer(self.timer_event, 1000)
-        event_map = {
-            self.timer_event: self.update_time,
-            pygame.KEYDOWN: self.key_down,
-            pygame.MOUSEBUTTONDOWN: self.mouse_down,
-        }
-        for event in self.pxl8.eventloop():
-            handler = event_map.get(event.type, None)
-            if handler is not None:
-                handler(event)

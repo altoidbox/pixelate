@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, fields
-import text
+import pixelate.text as text
 import pygame
 from typing import get_args, get_origin, Union
 from types import UnionType
