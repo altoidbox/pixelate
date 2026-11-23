@@ -3,7 +3,7 @@ import pixelate.text as text
 import time
 import yaml
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pixelate.config import *
 
 
@@ -12,27 +12,15 @@ CUR_DIR = Path(__file__).parent
 
 @dataclass
 class AppConfig(LoadableConfig):
-    font: FontFileConfig
-    background: ImageFileConfig | None = None
-    text_color: pygame.Color = field(default_factory=lambda: WHITE)
-    shadow_color: pygame.Color | None = None
+    font: FontFileConfig.ConfigType = FontFileConfig()
+    background: ImageFileConfig.ConfigType | None = field(default=ImageFileConfig())
+    text_color: pygame.Color = field(default=ColorConfig(WHITE))
+    shadow_color: pygame.Color | None = field(default=ColorConfig())
     xalign: int = 0
     yalign: int = 0
     show_dayofweek: bool = False
     show_date: bool = False
     twelve_hour: bool = False
-
-    @classmethod
-    def load(cls, config):
-        if 'font' in config:
-            config['font'] = FontFileConfig.load(config['font'])
-        if 'background' in config:
-            config['background'] = ImageFileConfig.load(config['background'])
-        if 'text_color' in config:
-            config['text_color'] = pygame.Color(config['text_color'])
-        if 'shadow_color' in config:
-            config['shadow_color'] = pygame.Color(config['shadow_color'])
-        return cls(**config)
 
 
 def load_configs(path):
@@ -40,7 +28,7 @@ def load_configs(path):
         return [AppConfig.load(config) for config in yaml.safe_load(f)]
 
 
-PRESETS = load_configs(CUR_DIR / 'clock.yml')
+PRESETS = load_configs(CUR_DIR / 'config.yml')
 
 
 class AppConfigEditorMixin:
@@ -165,7 +153,7 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
             pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
         # Configuration:
-        self.config = PRESETS[0]
+        self.config = PRESETS[self.config_index]
 
     @property
     def font(self):
@@ -176,7 +164,7 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
 
     def activate(self):
         self.pxl8.active_display = self.display
-        pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN])
+        #pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN])
         self.update_time(force=True)
         pygame.time.set_timer(self.timer_event, 1000)
 
@@ -185,9 +173,10 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
 
     def render_text(self, msg) -> pygame.Surface:
         if self.config.shadow_color is None:
-            surf = self.font.render(msg, self.config.text_color)
+            surf, _ = text.render(self.font, msg, self.config.text_color)
         else:
-            surf = text.text_shadow(self.font, msg, self.config.text_color, self.config.shadow_color)
+            surf = text.shadow(self.font, msg, self.config.text_color, self.config.shadow_color)
+        return surf
         r = surf.get_rect()
         r.inflate_ip((-1, 0))
         return surf.subsurface(r)

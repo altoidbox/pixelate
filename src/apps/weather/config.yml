@@ -1,0 +1,12 @@
+- font:
+    path: Micro5-Regular.ttf
+    size: 10
+  location: "Hamilton, OH"
+  #background:
+  #  path: null
+  #  xalign: 0
+  #  yalign: 0
+  #text_color_hi: [255, 255, 255, 255]
+  #text_color_lo: [255, 255, 255, 255]
+  #shadow_color: [80, 80, 80, 180]
+

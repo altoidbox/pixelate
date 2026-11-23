@@ -3,39 +3,60 @@ import pygame
 import threading
 from pygame import Surface
 import random
+import logging
+from dataclasses import dataclass
+from .config import *
 
 
 CLEAR = pygame.Color(0, 0, 0, 0)
 WHITE = pygame.Color(255, 255, 255, 255)
+LOGGER = logging.getLogger('pixelate')
+LOGGER.setLevel('INFO')
+LOGGER.addHandler(logging.StreamHandler())
 
 
+@dataclass
 class SquarePixel:
-    def __init__(self, size):
-        self.size = size
-        self.inner_border_color = pygame.Color(40, 40, 40)
-        self.outer_border_color = pygame.Color(0, 0, 0)
+    size: int
+    inner_border_color: pygame.Color = ColorConfig(default=(40, 40, 40))
+    inner_border_size: int = 1
+    outer_border_color: pygame.Color = ColorConfig(default=(0, 0, 0))
+    outer_border_size: int = 1
 
     def render(self, color, background):
         surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         surface.fill(background)
-        pygame.draw.rect(surface, color, (2, 2, self.size - 3, self.size - 3))
-        pygame.draw.rect(surface, self.inner_border_color, (1, 1, self.size - 2, self.size - 2), width=1)
-        pygame.draw.rect(surface, self.outer_border_color, (0, 0, self.size, self.size), width=1)
+        border_size = self.inner_border_size + self.outer_border_size
+        pygame.draw.rect(surface, color, (border_size, border_size, self.size -
+                         border_size * 2, self.size - border_size * 2))
+        if self.inner_border_size > 0:
+            pygame.draw.rect(surface, self.inner_border_color, (self.outer_border_size, self.outer_border_size,
+                             self.size - self.outer_border_size * 2, self.size - self.outer_border_size * 2), width=self.inner_border_size)
+        if self.outer_border_size > 0:
+            pygame.draw.rect(surface, self.outer_border_color,
+                             (0, 0, self.size, self.size), width=self.outer_border_size)
         return surface
 
 
+@dataclass
 class RoundPixel:
-    def __init__(self, size):
-        self.size = size
-        self.inner_border_color = pygame.Color(40, 40, 40)
-        self.outer_border_color = pygame.Color(0, 0, 0)
+    size: int
+    inner_border_color: pygame.Color = ColorConfig(default=(40, 40, 40))
+    inner_border_size: int = 1
+    outer_border_color: pygame.Color = ColorConfig(default=(0, 0, 0))
+    outer_border_size: int = 1
 
     def render(self, color, background):
         surface = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
         surface.fill(background)
-        pygame.draw.circle(surface, color, (self.size // 2, self.size // 2), self.size // 2 - 2)
-        pygame.draw.circle(surface, self.inner_border_color, (self.size // 2, self.size // 2), self.size // 2 - 1, width=1)
-        pygame.draw.circle(surface, self.outer_border_color, (self.size // 2, self.size // 2), self.size // 2, width=1)
+        border_size = self.inner_border_size + self.outer_border_size
+        pygame.draw.circle(surface, color, (self.size // 2, self.size // 2), self.size // 2 - border_size)
+        if self.inner_border_size > 0:
+            pygame.draw.circle(
+                surface, self.inner_border_color, (self.size // 2, self.size // 2), self.size // 2 - self.outer_border_size, width=self.inner_border_size)
+        if self.outer_border_size > 0:
+            pygame.draw.circle(
+                surface, self.outer_border_color, (self.size // 2, self.size // 2), self.size // 2, width=self.outer_border_size)
         return surface
 
 
@@ -75,8 +96,8 @@ def join_vertical(surfaces, xalign=0, ypadding=0):
     return full_surface
 
 
-def align_surface(rect: pygame.Rect|pygame.Surface, rel_to: pygame.Rect|pygame.Surface, 
-                  xalign: float|int = 0, yalign: float|int = 0, padding=0, offset=None):
+def align_surface(rect: pygame.Rect | pygame.Surface, rel_to: pygame.Rect | pygame.Surface,
+                  xalign: float | int = 0, yalign: float | int = 0, padding=0, offset=None):
     if isinstance(rel_to, pygame.Surface):
         rel_to = rel_to.get_rect()
     if isinstance(rect, pygame.Surface):
@@ -89,6 +110,25 @@ def align_surface(rect: pygame.Rect|pygame.Surface, rel_to: pygame.Rect|pygame.S
     rect.left = rel_to.left + within * xalign / 100
     within = rel_to.height - rect.height
     rect.top = rel_to.top + within * yalign / 100
+    if offset:
+        rect.move_ip(offset)
+    return rect
+
+
+def align_surface_center(rect: pygame.Rect | pygame.Surface, rel_to: pygame.Rect | pygame.Surface,
+                         xalign: float | int = 0, yalign: float | int = 0, padding=0, offset=None):
+    if isinstance(rel_to, pygame.Surface):
+        rel_to = rel_to.get_rect()
+    if isinstance(rect, pygame.Surface):
+        rect = rect.get_rect()
+    else:
+        rect = rect.copy()
+    if padding:
+        rel_to = rel_to.inflate(-2*padding, -2*padding)
+    center = rel_to.width * (xalign / 100)
+    rect.left = rel_to.left + center - rect.width / 2
+    center = rel_to.height * (yalign / 100)
+    rect.top = rel_to.top + center - rect.height / 2
     if offset:
         rect.move_ip(offset)
     return rect
@@ -117,7 +157,7 @@ class Pixelate:
 
         self.clock = pygame.time.Clock()
         self.effect = None
-        self.apps = set()
+        self.apps = []
         self.displays = {}
         self.next_display_id = 0
         self.active_display = self.create_display(self)
@@ -126,7 +166,8 @@ class Pixelate:
         print(f"Pixel disp: {self.active_display.width}x{self.active_display.height}")
         print(f"Pixel size: {self.active_display.pixel_width}x{self.active_display.pixel_width}")
         self.running = False
-        self.screen = pygame.display.set_mode(size=(self.screen_width, self.screen_height), flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
+        self.screen = pygame.display.set_mode(size=(self.screen_width, self.screen_height),
+                                              flags=pygame.FULLSCREEN | pygame.SCALED)  # | pygame.NOFRAME
         self.switch_app(PixelateApp(self))
 
     def create_display(self, owner, preferred_width=None, preferred_height=None):
@@ -135,16 +176,20 @@ class Pixelate:
             preferred_height = self.preferred_height
         ident = self.next_display_id
         self.next_display_id += 1
-        new_display = PixelateDisplay(owner, ident, self.screen_width, self.screen_height, preferred_width, preferred_height)
+        new_display = PixelateDisplay(owner, ident, self.screen_width, self.screen_height,
+                                      preferred_width, preferred_height)
         self.displays[ident] = new_display
         return new_display
 
-    @staticmethod
-    def is_quit_event(event: pygame.event.Event):
-        if event.type == pygame.QUIT:
+    def handle_event(self, event: pygame.event.Event):
+        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key in (pygame.K_q, pygame.K_ESCAPE)):
+            self.running = False
             return True
         elif event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_q, pygame.K_ESCAPE):
+            if event.key == pygame.K_a:
+                app_index = self.apps.index(self.active_app)
+                next_app = self.apps[(app_index + 1) % len(self.apps)]
+                self.switch_app(next_app)
                 return True
         return False
 
@@ -154,7 +199,7 @@ class Pixelate:
         effect.activate()
 
     def start_app(self, app: 'PixelateApp', activate=False):
-        self.apps.add(app)
+        self.apps.append(app)
         app.start()
         if activate:
             self.switch_app(app)
@@ -168,6 +213,7 @@ class Pixelate:
             self.active_app.deactivate()
         self.active_app = app
         self.active_app.activate()
+        self.active_display.needs_redraw = True
 
     def eventloop(self):
         self.running = True
@@ -175,9 +221,7 @@ class Pixelate:
             self.clock.tick(30)
             event = pygame.event.wait()
             while event.type != pygame.NOEVENT:
-                if self.is_quit_event(event):
-                    self.running = False
-                else:
+                if not self.handle_event(event):
                     self.active_app.handle_event(event)
                     if self.effect:
                         self.effect.handle_event(event)
@@ -343,7 +387,7 @@ class ShimmerEffect(PixelateApp):
                 flag = pygame.BLEND_RGB_SUB
             surf.fill((50, 50, 50), special_flags=flag)
             return surf
-        
+
     def __init__(self, pxl8: 'Pixelate'):
         self.pxl8 = pxl8
         self.timer_event = pygame.event.custom_type()
@@ -353,7 +397,7 @@ class ShimmerEffect(PixelateApp):
     def activate(self):
         print('ShimmerEffect', 'activate')
         self.display = self.pxl8.active_display
-        #pygame.time.set_timer(self.timer_event, random.randrange(2000, 20000))
+        # pygame.time.set_timer(self.timer_event, random.randrange(2000, 20000))
         pygame.time.set_timer(self.timer_event, 2000)
 
     def deactivate(self):
@@ -402,4 +446,3 @@ class ShimmerEffect(PixelateApp):
             self.progress_pixel(pixel)
         if len(self.shimmering) == 0:
             pygame.time.set_timer(self.timer_event, random.randrange(2000, 20000))
-

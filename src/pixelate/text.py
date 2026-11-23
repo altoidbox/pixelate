@@ -17,8 +17,8 @@ class PgFont(pygame.font.Font):
         self.name = name
 
 
-#Font = PgFont
-Font = pygame.freetype.Font
+Font = pygame.font.Font
+#Font = pygame.freetype.Font
 
 
 class Font3x5(Font):
@@ -178,11 +178,16 @@ def get_font(name, size=None):
     return font
 
 
-def text_shadow(font: pygame.freetype.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)) -> pygame.Surface:
+def render(font: Font, text: str, color: pygame.Color):
+    foreground = font.render(text, 0, color)
+    fg_rect = foreground.get_bounding_rect()
+    return foreground.subsurface(fg_rect), fg_rect
+
+
+def shadow(font: Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)) -> pygame.Surface:
     if isinstance(font, pygame.font.Font):
-        foreground = font.render(text, 0, color)
-        shadow = font.render(text, 0, shadow_color)
-        fg_rect = foreground.get_rect()
+        foreground, fg_rect = render(font, text, color)
+        shadow, _ = render(font, text, shadow_color)
         shadow.set_alpha(shadow_color.a)
     else:
         foreground, fg_rect = font.render(text, color)
@@ -197,7 +202,7 @@ def text_shadow(font: pygame.freetype.Font, text: str, color: pygame.Color, shad
     return surface
 
 
-def text_shadows(font: pygame.freetype.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offsets=[(1, 1)]):
+def shadows(font: pygame.freetype.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offsets=[(1, 1)]):
     if isinstance(font, pygame.font.Font):
         foreground = font.render(text, 0, color)
         shadow = font.render(text, 0, shadow_color)
