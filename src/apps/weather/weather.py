@@ -2,14 +2,13 @@
 
 from pixelate.pixelate import *
 import pixelate.text as text
-import io
 import yaml
 from pathlib import Path
 from dataclasses import dataclass
 from pixelate.config import *
 import requests
 import urllib.parse
-import json
+import datetime
 import logging
 
 
@@ -47,6 +46,47 @@ WEATHER_CODES = {
     99: "thunderstorm-with-heavy-hail"
 }
 
+WEATHER_ICON_TIMEOFDAY = {
+    "clear": 'sunny',
+    "mostly-clear": 'sunny-overcast',
+    "partly-cloudy": 'cloudy',
+    "fog": 'fog',
+    "depositing-rime-fog": 'fog',
+    "light-drizzle": 'sprinkle',
+    "light-freezing-drizzle": "rain-mix",
+    "light-rain": "rain",
+    "light-freezing-rain": "rain-mix",
+    "light-snow": "snow",
+    "light-rain-showers": "showers",
+    "light-snow-showers": "snow",
+    "thunderstorm": "storm-showers",
+    "thunderstorm-with-light-hail": 'sleet-storm',
+}
+WEATHER_ICON = {
+    "overcast": 'cloudy',
+    "drizzle": 'sprinkle',
+    "heavy-drizzle": 'showers',
+    "heavy-freezing-drizzle": "rain-mix",
+    "rain": "rain",
+    "heavy-rain": "rain-wind",
+    "heavy-freezing-rain": "hail",
+    "snow": "snow",
+    "heavy-snow": "snow-wind",
+    "snow-grains": "sleet",
+    "rain-showers": "showers",
+    "violent-rain-showers": "storm-showers",
+    "heavy-snow-showers": "snow-wind",
+    "heavy-thunderstorm": "thunderstorm",
+    "thunderstorm-with-heavy-hail": 'lightning'
+}
+
+
+def weather_icon(code, timeofday='day'):
+    name = WEATHER_CODES[code]
+    if timeofday and name in WEATHER_ICON_TIMEOFDAY:
+        return f'wi-{timeofday}-{WEATHER_ICON_TIMEOFDAY[name]}.svg'
+    return f'wi-{WEATHER_ICON[name]}.svg'
+
 
 def encode_params(params):
     elements = []
@@ -83,7 +123,7 @@ def create_location_request(location):
 
 
 def get_weather(config: 'AppConfig'):
-    url = create_weather_request(config.location, config.temp_units)
+    url = create_weather_request(config.location_coord, config.temp_units)
     resp = requests.get(url)
     if resp.status_code != 200:
         LOGGER.error(f'Weather request returned HTTP status {resp.status_code}')
@@ -115,8 +155,7 @@ def get_location(location):
 
 @dataclass
 class AppConfig(LoadableConfig):
-    location: str
-    location_coord: list = None
+    location: str | list
     font: FontFileConfig.ConfigType = FontFileConfig()
     background: ImageFileConfig.ConfigType | None = field(default=ImageFileConfig())
     text_color_hi: pygame.Color = field(default=ColorConfig('indianred3'))
@@ -124,6 +163,18 @@ class AppConfig(LoadableConfig):
     text_color_when: pygame.Color = field(default=ColorConfig('lightgray'))
     shadow_color: pygame.Color | None = field(default=ColorConfig())
     temp_units: str = "F"
+    _api_location: tuple | None = field(init=False, repr=False, compare=False, default=None)
+
+    @property
+    def location_coord(self):
+        if self._api_location is None:
+            if isinstance(self.location, str):
+                self._api_location = get_location(self.location)
+            elif isinstance(self.location, (list, tuple)):
+                self._api_location = tuple(self.location[:2])
+            else:
+                raise ValueError(f'Unknown location type: {self.location} ({type(self.location)})')
+        return self._api_location
 
     @classmethod
     def load(cls, config):
@@ -132,8 +183,6 @@ class AppConfig(LoadableConfig):
             config.temp_units = 'celsius'
         else:
             config.temp_units = 'fahrenheit'
-        #if config.location and not config.location_coord:
-        #    config.location = get_location(config.location)
         return config
 
 
@@ -237,6 +286,7 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
             pygame.KEYDOWN: self.key_down,
             #pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
+        self.weather = None
         # Configuration:
         self.config = PRESETS[0]
 
@@ -267,13 +317,15 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
 
     def draw_one_day(self, weather_code, hi_temp, lo_temp, when=None):
         name = WEATHER_CODES[weather_code]
-        icon_dir = Path('resources/weather-icons/')
-        if (icon_dir / f'{name}-day.svg').exists():
-            path = (icon_dir / f'{name}-day.svg')
-        else:
-            path = (icon_dir / f'{name}.svg')
+        icon_dir = Path('resources/weather-icons/svg')
+        #if (icon_dir / f'{name}-day.svg').exists():
+        #    path = (icon_dir / f'{name}-day.svg')
+        #else:
+        #    path = (icon_dir / f'{name}.svg')
+        path = (icon_dir / weather_icon(weather_code))
         size = self.display.width // 3 - 1
         icon = pygame.image.load_sized_svg(path, (size, size))
+        icon = pygame.transform.solid_overlay(icon, "gray", keep_alpha=True)
         print(f'icon size: {icon.get_rect().bottomright}')
         
         hi = self.render_text(f'{hi_temp}', self.config.text_color_hi)
@@ -287,6 +339,15 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
         return join_vertical(stack, xalign=50, ypadding=1)
 
     def draw_weather(self, weather):
+        days = []
+        for i in range(3):
+            code = weather['weather_code'][i]
+            hi = int(weather['temperature_2m_max'][i])
+            lo = int(weather['temperature_2m_min'][i])
+            date = datetime.date(*(int(x) for x in weather['time'][i].split('-')))
+            dayofweek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][date.weekday()]
+            days.append(self.draw_one_day(code, hi, lo, dayofweek))
+        return days
         day1 = self.draw_one_day(0, 70, 34, 'Tue')
         day2 = self.draw_one_day(3, 68, 29, 'Wed')
         day3 = self.draw_one_day(95, 61, 35, 'Thu')
@@ -302,8 +363,11 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
             else:
                 self.display.fill(self.display.rect, SquarePixel(size=self.display.pixel_width, inner_border_color='black'), layer=2)
                 self.display.fill(self.display.rect, (0, 0, 0, 0), layer=0)
+        if event or self.weather is None:
+            current_weather, daily_weather = get_weather(self.config)
+            self.weather = daily_weather
         self.display.fill(self.display.rect, CLEAR)
-        days = self.draw_weather(None)
+        days = self.draw_weather(self.weather)
         for i, surf in enumerate(days):
             xalign = (i) * 50
             rect = align_surface(surf, rel_to=self.display.rect, xalign=xalign, yalign=0, padding=1)
