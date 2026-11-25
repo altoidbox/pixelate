@@ -155,10 +155,6 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
         # Configuration:
         self.config = PRESETS[self.config_index]
 
-    @property
-    def font(self):
-        return self.config.font.value
-
     def start(self):
         pass
 
@@ -172,11 +168,7 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
         pygame.time.set_timer(self.timer_event, 0)
 
     def render_text(self, msg) -> pygame.Surface:
-        if self.config.shadow_color is None:
-            surf, _ = text.render(self.font, msg, self.config.text_color)
-        else:
-            surf = text.shadow(self.font, msg, self.config.text_color, self.config.shadow_color)
-        return surf
+        return text.render(self.config.font.value, msg, self.config.text_color, self.config.shadow_color)
         r = surf.get_rect()
         r.inflate_ip((-1, 0))
         return surf.subsurface(r)

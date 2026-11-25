@@ -46,46 +46,16 @@ WEATHER_CODES = {
     99: "thunderstorm-with-heavy-hail"
 }
 
-WEATHER_ICON_TIMEOFDAY = {
-    "clear": 'sunny',
-    "mostly-clear": 'sunny-overcast',
-    "partly-cloudy": 'cloudy',
-    "fog": 'fog',
-    "depositing-rime-fog": 'fog',
-    "light-drizzle": 'sprinkle',
-    "light-freezing-drizzle": "rain-mix",
-    "light-rain": "rain",
-    "light-freezing-rain": "rain-mix",
-    "light-snow": "snow",
-    "light-rain-showers": "showers",
-    "light-snow-showers": "snow",
-    "thunderstorm": "storm-showers",
-    "thunderstorm-with-light-hail": 'sleet-storm',
-}
-WEATHER_ICON = {
-    "overcast": 'cloudy',
-    "drizzle": 'sprinkle',
-    "heavy-drizzle": 'showers',
-    "heavy-freezing-drizzle": "rain-mix",
-    "rain": "rain",
-    "heavy-rain": "rain-wind",
-    "heavy-freezing-rain": "hail",
-    "snow": "snow",
-    "heavy-snow": "snow-wind",
-    "snow-grains": "sleet",
-    "rain-showers": "showers",
-    "violent-rain-showers": "storm-showers",
-    "heavy-snow-showers": "snow-wind",
-    "heavy-thunderstorm": "thunderstorm",
-    "thunderstorm-with-heavy-hail": 'lightning'
-}
 
-
-def weather_icon(code, timeofday='day'):
+def weather_icon(icons: YamlFileConfig.ConfigType, code, timeofday='day') -> Path:
     name = WEATHER_CODES[code]
-    if timeofday and name in WEATHER_ICON_TIMEOFDAY:
-        return f'wi-{timeofday}-{WEATHER_ICON_TIMEOFDAY[name]}.svg'
-    return f'wi-{WEATHER_ICON[name]}.svg'
+    mapping = icons.value
+    dir_ = icons.path.parent / mapping.get('directory', '.')
+    if timeofday and name in mapping.get(timeofday, {}):
+        return dir_ / mapping[timeofday][name]
+    if name not in mapping.get('general', {}):
+        return None
+    return dir_ / mapping['general'][name]
 
 
 def encode_params(params):
@@ -105,7 +75,7 @@ def create_weather_request(location, temp_units='fahrenheit'):
         # "hourly": ["temperature_2m", "weather_code"],
         "current": ["temperature_2m", "weather_code", "is_day"],
         "timezone": "auto",
-        "forecast_days": 3,
+        "forecast_days": 4,
         "temperature_unit": temp_units,
     }
     return f'https://api.open-meteo.com/v1/forecast?{encode_params(params)}'
@@ -157,6 +127,7 @@ def get_location(location):
 class AppConfig(LoadableConfig):
     location: str | list
     font: FontFileConfig.ConfigType = FontFileConfig()
+    icons: YamlFileConfig.ConfigType = YamlFileConfig()
     background: ImageFileConfig.ConfigType | None = field(default=ImageFileConfig())
     text_color_hi: pygame.Color = field(default=ColorConfig('indianred3'))
     text_color_lo: pygame.Color = field(default=ColorConfig('royalblue'))
@@ -290,10 +261,6 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
         # Configuration:
         self.config = PRESETS[0]
 
-    @property
-    def font(self):
-        return self.config.font.value
-
     def start(self):
         pass
 
@@ -308,24 +275,18 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
         pygame.time.set_timer(self.timer_event, 0)
 
     def render_text(self, msg, color) -> pygame.Surface:
-        if self.config.shadow_color is None:
-            surf, _ = text.render(self.font, msg, color)
-            return surf
-        else:
-            surf = text.shadow(self.font, msg, color, self.config.shadow_color)
-            return surf
+        return text.render(self.config.font.value, msg, color, self.config.shadow_color)
 
     def draw_one_day(self, weather_code, hi_temp, lo_temp, when=None):
-        name = WEATHER_CODES[weather_code]
-        icon_dir = Path('resources/weather-icons/svg')
-        #if (icon_dir / f'{name}-day.svg').exists():
-        #    path = (icon_dir / f'{name}-day.svg')
-        #else:
-        #    path = (icon_dir / f'{name}.svg')
-        path = (icon_dir / weather_icon(weather_code))
+        path = weather_icon(self.config.icons, weather_code)
         size = self.display.width // 3 - 1
-        icon = pygame.image.load_sized_svg(path, (size, size))
-        icon = pygame.transform.solid_overlay(icon, "gray", keep_alpha=True)
+        if path.suffix == '.svg':
+            icon = pygame.image.load_sized_svg(path, (size, size))
+            icon = pygame.transform.solid_overlay(icon, "white", keep_alpha=True)
+        else:
+            icon = pygame.image.load(path)
+            scale = (size / icon.size[0])
+            icon = pygame.transform.smoothscale_by(icon, scale)
         print(f'icon size: {icon.get_rect().bottomright}')
         
         hi = self.render_text(f'{hi_temp}', self.config.text_color_hi)

@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field, fields
 import pixelate.text as text
 import pygame
+from pathlib import Path
+import yaml
 
 
 class LoadableConfig:
@@ -43,12 +45,37 @@ class ConfigDescriptor:
         setattr(instance, self.name, value)
 
 
+class FileConfig(ConfigDescriptor):
+    class ConfigType(LoadableConfig):
+        @classmethod
+        def load(cls, value):
+            if value is None:
+                return None
+            return Path(value)
+
+
+class YamlFileConfig(ConfigDescriptor):
+    @dataclass
+    class ConfigType(LoadableConfig):
+        path: Path
+        value: dict
+
+        @classmethod
+        def load(cls, value):
+            if value is None:
+                return None
+            path = Path(value)
+            with open(path, 'r') as f:
+                value = yaml.safe_load(f)
+            return cls(path, value)
+
+
 class FontFileConfig(ConfigDescriptor):
     @dataclass
     class ConfigType(LoadableConfig):
         family: str | None = None
         style: str | None = None
-        path: str | None = None
+        path: Path | None = field(default=FileConfig())
         size: int | None = None
         _font: text.Font | None = field(init=False, repr=False, compare=False, default=None)
         _font_key: tuple | None = field(init=False, repr=False, compare=False, default=None)
@@ -72,7 +99,7 @@ class FontFileConfig(ConfigDescriptor):
 class ImageFileConfig(ConfigDescriptor):
     @dataclass
     class ConfigType(LoadableConfig):
-        path: str
+        path: Path = FileConfig()
         xalign: int = 0
         yalign: int = 0
         _surface: pygame.Surface | None = field(init=False, repr=False, compare=False, default=None)

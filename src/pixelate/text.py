@@ -178,20 +178,21 @@ def get_font(name, size=None):
     return font
 
 
-def render(font: Font, text: str, color: pygame.Color):
-    foreground = font.render(text, 0, color)
-    fg_rect = foreground.get_bounding_rect()
-    return foreground.subsurface(fg_rect), fg_rect
-
-
-def shadow(font: Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offset=(1, 1)) -> pygame.Surface:
+def render_simple(font: Font, text: str, color: pygame.Color):
     if isinstance(font, pygame.font.Font):
-        foreground, fg_rect = render(font, text, color)
-        shadow, _ = render(font, text, shadow_color)
+        foreground = font.render(text, 0, color)
+        fg_rect = foreground.get_bounding_rect()
+        return foreground.subsurface(fg_rect), fg_rect
+    return font.render(text, color)
+
+
+def render(font: Font, text: str, color: pygame.Color, shadow_color: pygame.Color | None = None, offset=(1, 1)) -> pygame.Surface:
+    foreground, fg_rect = render_simple(font, text, color)
+    if shadow_color is None:
+        return foreground
+    shadow, _ = render_simple(font, text, shadow_color)
+    if isinstance(font, pygame.font.Font):
         shadow.set_alpha(shadow_color.a)
-    else:
-        foreground, fg_rect = font.render(text, color)
-        shadow, _ = font.render(None, shadow_color)
     dx, dy = offset
     width = fg_rect.x + fg_rect.width + abs(dx)
     height = fg_rect.y + fg_rect.height + abs(dy)
