@@ -2,7 +2,7 @@
     path: Micro5-Regular.ttf
     size: 10
   location: "Hamilton, OH"
-  icons: resources/weather-icons/wi.yml
+  icons: resources/weather-icons/wsymbol.yml
   #background:
   #  path: null
   #  xalign: 0

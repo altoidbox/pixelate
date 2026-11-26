@@ -47,7 +47,8 @@ WEATHER_CODES = {
 }
 
 
-def weather_icon(icons: YamlFileConfig.ConfigType, code, timeofday='day') -> Path:
+def weather_icon(icons: YamlFileConfig.ConfigType, code, is_day=True) -> Path:
+    timeofday = 'day' if is_day else 'night'
     name = WEATHER_CODES[code]
     mapping = icons.value
     dir_ = icons.path.parent / mapping.get('directory', '.')
@@ -71,11 +72,13 @@ def create_weather_request(location, temp_units='fahrenheit'):
     params = {
         "latitude": location[0],
         "longitude": location[1],
+        "forecast_days": 4,
         "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "sunrise", "sunset"],
-        # "hourly": ["temperature_2m", "weather_code"],
+        "forecast_hours": 12,
+        "past_hours": 0,
+        "hourly": ["temperature_2m", "weather_code", "is_day"],
         "current": ["temperature_2m", "weather_code", "is_day"],
         "timezone": "auto",
-        "forecast_days": 4,
         "temperature_unit": temp_units,
     }
     return f'https://api.open-meteo.com/v1/forecast?{encode_params(params)}'
@@ -100,7 +103,7 @@ def get_weather(config: 'AppConfig'):
         return None
     try:
         data = resp.json()
-        return data['current'], data['daily']
+        return data
     except:
         LOGGER.exception('Weather request returned unexpected data')
         return None
@@ -128,6 +131,7 @@ class AppConfig(LoadableConfig):
     location: str | list
     font: FontFileConfig.ConfigType = FontFileConfig()
     icons: YamlFileConfig.ConfigType = YamlFileConfig()
+    icon_color: pygame.Color | None = ColorConfig()
     background: ImageFileConfig.ConfigType | None = field(default=ImageFileConfig())
     text_color_hi: pygame.Color = field(default=ColorConfig('indianred3'))
     text_color_lo: pygame.Color = field(default=ColorConfig('royalblue'))
@@ -171,6 +175,10 @@ class AppConfigEditorMixin:
     CONFIG_MODE_FONT = 1
     CONFIG_MODE_BACKGROUND = 2
 
+    WEATHER_TYPE_DAILY = 0
+    WEATHER_TYPE_HOURLY = 1
+    WEATHER_TYPE_COUNT = 2
+
     def __init__(self, *args, **kwargs):
         self.__config_mode = self.CONFIG_MODE_NONE
         self.fonts = text.get_fonts()
@@ -178,6 +186,7 @@ class AppConfigEditorMixin:
         self.bg_paths = list(Path('resources/backgrounds').iterdir())
         self.bg_index = 0
         self.config_index = 1
+        self.weather_type = self.WEATHER_TYPE_DAILY
 
     def key_down_font(self, event):
         match event.key:
@@ -245,6 +254,13 @@ class AppConfigEditorMixin:
         if update:
             self.update(force=True)
 
+    def mouse_down(self, event):
+        self.weather_type += 1
+        if self.weather_type >= self.WEATHER_TYPE_COUNT:
+            self.weather_type = 0
+        self.update()
+        return True
+
 
 class WeatherApp(AppConfigEditorMixin, PixelateApp):
     def __init__(self, pxl8: Pixelate):
@@ -255,7 +271,7 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
         self.event_map = {
             self.timer_event: self.update,
             pygame.KEYDOWN: self.key_down,
-            #pygame.MOUSEBUTTONDOWN: self.mouse_down,
+            pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
         self.weather = None
         # Configuration:
@@ -268,8 +284,8 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
         self.pxl8.active_display = self.display
         #pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN])
         self.update(force=True)
-        # Update every 5 minutes
-        pygame.time.set_timer(self.timer_event, 5 * 60 * 1000)
+        # Update every 15 minutes
+        pygame.time.set_timer(self.timer_event, 15 * 60 * 1000)
 
     def deactivate(self):
         pygame.time.set_timer(self.timer_event, 0)
@@ -277,43 +293,73 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
     def render_text(self, msg, color) -> pygame.Surface:
         return text.render(self.config.font.value, msg, color, self.config.shadow_color)
 
-    def draw_one_day(self, weather_code, hi_temp, lo_temp, when=None):
-        path = weather_icon(self.config.icons, weather_code)
+    def draw_one_day(self, weather_code, temp, when=None, is_day=True):
+        path = weather_icon(self.config.icons, weather_code, is_day)
         size = self.display.width // 3 - 1
         if path.suffix == '.svg':
+            #icon = pygame.image.load_sized_svg(path, (128, 128))
             icon = pygame.image.load_sized_svg(path, (size, size))
-            icon = pygame.transform.solid_overlay(icon, "white", keep_alpha=True)
         else:
             icon = pygame.image.load(path)
             scale = (size / icon.size[0])
-            icon = pygame.transform.smoothscale_by(icon, scale)
+            icon = pygame.transform.scale_by(icon, scale)
+        if self.config.icon_color is not None:
+            icon = pygame.transform.solid_overlay(icon, self.config.icon_color, keep_alpha=True)
+
         print(f'icon size: {icon.get_rect().bottomright}')
-        
-        hi = self.render_text(f'{hi_temp}', self.config.text_color_hi)
-        lo = self.render_text(f'{lo_temp}', self.config.text_color_lo)
-        temp = join_horizontal((hi, lo), yalign=100, xpadding=2)
-        print(f'temp size: {temp.get_rect().bottomright}, hi:{hi.get_rect()} lo:{lo.get_rect()}')
-        stack = [icon, temp]
+
+        if isinstance(temp, (list, tuple)):
+            hi_temp, lo_temp = temp
+            hi = self.render_text(f'{hi_temp}', self.config.text_color_hi)
+            lo = self.render_text(f'{lo_temp}', self.config.text_color_lo)
+            temp_surf = join_horizontal((hi, lo), yalign=100, xpadding=2)
+        else:
+            # TODO: Temp color gradiant from red=112 to yellow=72 to blue=32 to white=-8
+            temp_surf = self.render_text(f'{temp}', self.config.text_color_when)
+        #print(f'temp size: {temp.get_rect().bottomright}, hi:{hi.get_rect()} lo:{lo.get_rect()}')
+        stack = [icon, temp_surf]
         if when:
             stack.append(self.render_text(when, self.config.text_color_when))
 
         return join_vertical(stack, xalign=50, ypadding=1)
 
-    def draw_weather(self, weather):
+    def draw_daily_weather(self, weather):
+        daily = weather['daily']
         days = []
         for i in range(3):
-            code = weather['weather_code'][i]
-            hi = int(weather['temperature_2m_max'][i])
-            lo = int(weather['temperature_2m_min'][i])
-            date = datetime.date(*(int(x) for x in weather['time'][i].split('-')))
+            code = daily['weather_code'][i]
+            hi = int(daily['temperature_2m_max'][i])
+            lo = int(daily['temperature_2m_min'][i])
+            date = datetime.date(*(int(x) for x in daily['time'][i].split('-')))
             dayofweek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][date.weekday()]
-            days.append(self.draw_one_day(code, hi, lo, dayofweek))
+            days.append(self.draw_one_day(code, (hi, lo), dayofweek))
         return days
-        day1 = self.draw_one_day(0, 70, 34, 'Tue')
-        day2 = self.draw_one_day(3, 68, 29, 'Wed')
-        day3 = self.draw_one_day(95, 61, 35, 'Thu')
 
-        return day1, day2, day3
+    def draw_hourly_weather(self, weather):
+        hours = []
+        current = weather['current']
+        hourly = weather['hourly']
+        # replace index 0 with current weather to make getting them all easier later
+        for key in hourly.keys():
+            hourly[key][0] = current[key]
+        #index = 0
+        #if int(current['time'][2:]) >= 30:
+        #    # if current time is at the half or greater, then increment index once
+        #    index += 1
+        for i in range(3):
+            i = i * 3
+            code = hourly['weather_code'][i]
+            temp = int(hourly['temperature_2m'][i])
+            hour = int(hourly['time'][i].split('T')[1].split(':')[0])
+            if hour >= 12:
+                time = f'{hour-12}p'
+            else:
+                if hour == 0:
+                    hour = 12
+                time = f'{hour}a'
+
+            hours.append(self.draw_one_day(code, temp, time, hourly['is_day'][i]))
+        return hours
 
     def update(self, event=None, force=False):
         if force:
@@ -325,15 +371,17 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
                 self.display.fill(self.display.rect, SquarePixel(size=self.display.pixel_width, inner_border_color='black'), layer=2)
                 self.display.fill(self.display.rect, (0, 0, 0, 0), layer=0)
         if event or self.weather is None:
-            current_weather, daily_weather = get_weather(self.config)
-            self.weather = daily_weather
+            self.weather = get_weather(self.config)
         self.display.fill(self.display.rect, CLEAR)
-        days = self.draw_weather(self.weather)
-        for i, surf in enumerate(days):
+        if self.weather_type == self.WEATHER_TYPE_DAILY:
+            units = self.draw_daily_weather(self.weather)
+        elif self.weather_type == self.WEATHER_TYPE_HOURLY:
+            units = self.draw_hourly_weather(self.weather)
+        for i, surf in enumerate(units):
             xalign = (i) * 50
             rect = align_surface(surf, rel_to=self.display.rect, xalign=xalign, yalign=0, padding=1)
             self.display.draw_surface(rect.topleft, surf)
-            print(f'draw {surf.get_rect().bottomright} at {rect.topleft}')
+            #print(f'draw {surf.get_rect().bottomright} at {rect.topleft}')
 
     def handle_event(self, event: pygame.event.Event):
         handler = self.event_map.get(event.type, None)

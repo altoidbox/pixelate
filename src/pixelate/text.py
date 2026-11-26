@@ -1,5 +1,5 @@
 import pygame
-import pygame.freetype
+#import pygame.freetype
 from pathlib import Path
 
 
@@ -172,9 +172,9 @@ def get_font(name, size=None):
     if not path.exists():
         path = Path('./resources/fonts') / name
     LOADED_FONTS[(name, size)] = font = Font(str(path), size)
-    if isinstance(font, pygame.freetype.Font):
-        font.antialiased = False
-        font.pad = True
+    #if isinstance(font, pygame.freetype.Font):
+    #    font.antialiased = False
+    #    font.pad = True
     return font
 
 
@@ -203,7 +203,7 @@ def render(font: Font, text: str, color: pygame.Color, shadow_color: pygame.Colo
     return surface
 
 
-def shadows(font: pygame.freetype.Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offsets=[(1, 1)]):
+def shadows(font: Font, text: str, color: pygame.Color, shadow_color: pygame.Color, offsets=[(1, 1)]):
     if isinstance(font, pygame.font.Font):
         foreground = font.render(text, 0, color)
         shadow = font.render(text, 0, shadow_color)

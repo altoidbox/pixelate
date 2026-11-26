@@ -126,17 +126,6 @@ class AppConfigEditorMixin:
         if update:
             self.update_time(force=True)
 
-    def mouse_down(self, event: pygame.event.Event):
-        # translate mouse position to pixel grid position
-        x, y = event.pos
-        x = x // self.display.pixel_width
-        y = y // self.display.pixel_width
-        print('Mouse:', event.button, '@', (x, y))
-        style = self.display.styles[0]
-        if self.display.style[y][x] == style:
-            style = self.display.styles[1]
-        self.display.set_color((x, y), style, layer=2)
-
 
 class ClockApp(AppConfigEditorMixin, PixelateApp):
     def __init__(self, pxl8: Pixelate):
@@ -150,7 +139,6 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
         self.event_map = {
             self.timer_event: self.update_time,
             pygame.KEYDOWN: self.key_down,
-            pygame.MOUSEBUTTONDOWN: self.mouse_down,
         }
         # Configuration:
         self.config = PRESETS[self.config_index]

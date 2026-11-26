@@ -181,15 +181,30 @@ class Pixelate:
         self.displays[ident] = new_display
         return new_display
 
+    def next_app(self, direction=1):
+        app_index = self.apps.index(self.active_app)
+        next_app = self.apps[(app_index + direction) % len(self.apps)]
+        self.switch_app(next_app)
+
     def handle_event(self, event: pygame.event.Event):
         if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key in (pygame.K_q, pygame.K_ESCAPE)):
             self.running = False
             return True
         elif event.type == pygame.KEYDOWN:
             if event.key == pygame.K_a:
-                app_index = self.apps.index(self.active_app)
-                next_app = self.apps[(app_index + 1) % len(self.apps)]
-                self.switch_app(next_app)
+                self.next_app()
+                return True
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            x, y = event.pos
+            x = x // self.active_display.pixel_width
+            y = y // self.active_display.pixel_width
+            print('Mouse:', event.button, '@', (x, y))
+            pct20 = self.active_display.width / 5
+            if x < pct20:
+                self.next_app(direction=-1)
+                return True
+            elif x >= self.active_display.width - pct20:
+                self.next_app()
                 return True
         return False
 
