@@ -148,7 +148,6 @@ class ClockApp(AppConfigEditorMixin, PixelateApp):
 
     def activate(self):
         self.pxl8.active_display = self.display
-        #pygame.event.set_allowed([self.timer_event, pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN])
         self.update_time(force=True)
         pygame.time.set_timer(self.timer_event, 1000)
 

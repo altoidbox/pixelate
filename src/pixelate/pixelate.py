@@ -187,6 +187,8 @@ class Pixelate:
         self.switch_app(next_app)
 
     def handle_event(self, event: pygame.event.Event):
+        if event.type < pygame.USEREVENT:
+            print(event)
         if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key in (pygame.K_q, pygame.K_ESCAPE)):
             self.running = False
             return True
@@ -194,18 +196,24 @@ class Pixelate:
             if event.key == pygame.K_a:
                 self.next_app()
                 return True
-        elif event.type == pygame.MOUSEBUTTONDOWN:
-            x, y = event.pos
-            x = x // self.active_display.pixel_width
-            y = y // self.active_display.pixel_width
-            print('Mouse:', event.button, '@', (x, y))
-            pct20 = self.active_display.width / 5
-            if x < pct20:
+        elif event.type == pygame.MOUSEBUTTONUP or event.type == pygame.FINGERUP:
+            if event.type == pygame.MOUSEBUTTONUP:
+                x, y = event.pos
+                xpct = self.active_display.pixel_width / x
+            else:
+                xpct = event.x
+            if xpct < 0.2:
                 self.next_app(direction=-1)
                 return True
-            elif x >= self.active_display.width - pct20:
+            elif xpct >= 0.8:
                 self.next_app()
                 return True
+        elif event.type == pygame.WINDOWFOCUSGAINED:
+            pygame.mouse.set_visible(False)
+            return True
+        elif event.type == pygame.WINDOWFOCUSLOST:
+            pygame.mouse.set_visible(True)
+            return True
         return False
 
     def enable_effect(self, effect):

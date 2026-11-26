@@ -254,7 +254,14 @@ class AppConfigEditorMixin:
         if update:
             self.update(force=True)
 
-    def mouse_down(self, event):
+    def mouse_up(self, event):
+        self.weather_type += 1
+        if self.weather_type >= self.WEATHER_TYPE_COUNT:
+            self.weather_type = 0
+        self.update()
+        return True
+
+    def finger_up(self, event):
         self.weather_type += 1
         if self.weather_type >= self.WEATHER_TYPE_COUNT:
             self.weather_type = 0
@@ -271,7 +278,8 @@ class WeatherApp(AppConfigEditorMixin, PixelateApp):
         self.event_map = {
             self.timer_event: self.update,
             pygame.KEYDOWN: self.key_down,
-            pygame.MOUSEBUTTONDOWN: self.mouse_down,
+            pygame.MOUSEBUTTONUP: self.mouse_up,
+            pygame.FINGERUP: self.finger_up,
         }
         self.weather = None
         # Configuration:
